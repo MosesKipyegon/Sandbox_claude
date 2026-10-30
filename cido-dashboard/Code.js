@@ -19,18 +19,52 @@ function buildDashboardFeed() {
   const masterData = master.getRange(2, 1, masterLast - 1, 11).getValues();
   // 0=ID, 1=FullName, 2=ShortName, 3=Sector, 4=County, 5=Unit, 6=Target
 
-  const monthHeaders = raw.getRange(8, 6, 1, 24).getDisplayValues()[0];
+  // Raw_Data: headers on row 8, data from row 9.
+  //   A ID | B Short | C Disagg | D Unit | E County (optional) | Target | 24 month columns
+  // Columns after D are found by their header, so adding the County column shifts nothing.
+  const HEADER_ROW = 8;
+  const PROJECT_MONTHS = 24;
+  const lastCol = raw.getLastColumn();
+  const headerVals = raw.getRange(HEADER_ROW, 1, 1, lastCol).getValues()[0];
+  const headerText = raw.getRange(HEADER_ROW, 1, 1, lastCol).getDisplayValues()[0].map(h => String(h).trim());
+  const findHeader = name => headerText.findIndex(h => h.toLowerCase() === name);
+
+  const countyCol = findHeader('county');           // -1 = no County column (legacy layout)
+  const targetCol = findHeader('target');
+  const looksLikeMonth = (v, text) =>
+    v instanceof Date || /^[A-Za-z]{3,9}[\s\-\/']*\d{2,4}$/.test(text);
+  let monthStart = headerText.findIndex((t, i) => i > 3 && i !== countyCol && i !== targetCol && looksLikeMonth(headerVals[i], t));
+  if (monthStart < 0) monthStart = Math.max(4, countyCol, targetCol) + 1;
+
+  const monthHeaders = headerText.slice(monthStart, monthStart + PROJECT_MONTHS);
 
   const rawLast = raw.getLastRow();
-  const disaggData = raw.getRange(9, 1, rawLast - 8, 4).getValues();   // A:D — ID, Short, Disagg, Unit
-  const rawValues  = raw.getRange(9, 6, rawLast - 8, 24).getValues();  // F:AC — 24 months of values
+  const rawRows = raw.getRange(HEADER_ROW + 1, 1, rawLast - HEADER_ROW, lastCol).getValues();
 
   // Lookup map for master metadata
   const masterMap = {};
   masterData.forEach(r => { masterMap[r[0]] = r; });
 
-  const counties = ['Akobo', 'Nyirol'];
   const monthsPerIndicator = monthHeaders.length; // 24
+  const warnings = [];
+
+  /** Target from Activities_Master for a disaggregation (Total/Male/Female/Boy/Girl) */
+  const masterTarget = (m, disagg) => {
+    const col = { Total: 6, Male: 7, Female: 8, Boy: 9, Girl: 10 }[disagg];
+    const t = col === undefined ? 0 : m[col];
+    return t === '' || t == null ? 0 : Number(t) || 0;
+  };
+
+  // How many county rows each indicator × disagg has (to split a master target when a row has none)
+  const rowsPerIndDisagg = {};
+  if (countyCol >= 0) {
+    rawRows.forEach(r => {
+      if (!r[0] || !r[2]) return;
+      const k = r[0] + '|' + r[2];
+      rowsPerIndDisagg[k] = (rowsPerIndDisagg[k] || 0) + 1;
+    });
+  }
+  const countyTargetSums = {}; // indID → sum of county "Total" targets, checked against the master
 
   // ---------- BUILD OUTPUT IN MEMORY ----------
   const out = [];
@@ -43,7 +77,7 @@ function buildDashboardFeed() {
   // We'll compute cumulative per (indicator, county, disagg) as we go
   const cumTracker = {}; // key = indID|county|disagg  → running total (only for "Total" rows)
 
-  disaggData.forEach((row, rIdx) => {
+  rawRows.forEach(row => {
     const indID     = row[0];
     const shortName = row[1];
     const disagg    = row[2];
@@ -53,26 +87,36 @@ function buildDashboardFeed() {
     const m = masterMap[indID] || [];
     const fullName = m[1] || '';
     const sector   = m[3] || '';
-    let target = 0;
-    const assignedCounty = m[4] || 'Both'; // Read the assigned County from Activities_Master
-    if (m) {
-      if (disagg === 'Total')  target = m[6];
-      if (disagg === 'Male')   target = m[7];
-      if (disagg === 'Female') target = m[8];
-      if (disagg === 'Boy')    target = m[9];
-      if (disagg === 'Girl')   target = m[10];
-      if (target === '') target = 0;
+    const assignedCounty = m[4] || 'Both'; // Assigned County from Activities_Master
+
+    // Which county (or counties) this row's values belong to, and the target for each
+    let countiesToRun, target;
+    if (countyCol >= 0) {
+      // County mode: one Raw_Data row per indicator × disagg × county
+      let county = String(row[countyCol] || '').trim();
+      if (!county) {
+        county = assignedCounty !== 'Both' ? assignedCounty : 'Unspecified';
+        if (county === 'Unspecified') warnings.push(shortName + ' (' + disagg + ') has no County');
+      }
+      countiesToRun = [county];
+      const rowTarget = targetCol >= 0 ? row[targetCol] : '';
+      target = (rowTarget !== '' && rowTarget != null && !isNaN(Number(rowTarget)))
+        ? Number(rowTarget)
+        : masterTarget(m, disagg) / (rowsPerIndDisagg[indID + '|' + disagg] || 1);
+      if (disagg === 'Total') countyTargetSums[indID] = (countyTargetSums[indID] || 0) + target;
+    } else {
+      // Legacy layout (no County column): the same values are shown under each assigned county
+      countiesToRun = assignedCounty === 'Both' ? ['Akobo', 'Nyirol'] : [assignedCounty];
+      target = masterTarget(m, disagg);
     }
 
-    const countiesToRun = assignedCounty === 'Both' ? ['Akobo', 'Nyirol'] : [assignedCounty];
-    
     countiesToRun.forEach(county => {
       let running = 0;
 
       for (let i = 0; i < monthsPerIndicator; i++) {
         const monthLabel = monthHeaders[i];
         const monthNum   = i + 1;
-        const rawVal     = rawValues[rIdx][i];
+        const rawVal     = row[monthStart + i];
         const value      = (rawVal === '' || rawVal == null) ? 0 : Number(rawVal);
 
         let cumulative = '';
@@ -87,7 +131,7 @@ function buildDashboardFeed() {
           if (target && target > 0) {
             pctAchieved = cumulative / target;
           }
-          expectedPct = monthNum / 24;
+          expectedPct = monthNum / PROJECT_MONTHS;
 
           if (pctAchieved !== '') {
             // 1. Calculate what the target SHOULD be at this month
@@ -140,8 +184,23 @@ function buildDashboardFeed() {
     feed.getRange(2, 9, out.length - 1, 1).setNumberFormat('@');
   }
 
+  // ---------- CHECKS ----------
+  if (countyCol >= 0) {
+    Object.keys(countyTargetSums).forEach(id => {
+      const m = masterMap[id];
+      const expected = m ? masterTarget(m, 'Total') : 0;
+      if (expected && Math.abs(countyTargetSums[id] - expected) > 0.5) {
+        warnings.push(id + ': county targets add up to ' + countyTargetSums[id] + ', Activities_Master says ' + expected);
+      }
+    });
+  }
+  warnings.forEach(w => Logger.log(w));
+
+  const mode = countyCol >= 0 ? 'by county' : 'legacy layout, no County column';
   SpreadsheetApp.getActiveSpreadsheet().toast(
-    `Dashboard_Feed built: ${out.length - 1} rows`, 'Done', 5
+    `Dashboard_Feed built: ${out.length - 1} rows (${mode}).` +
+      (warnings.length ? ` ${warnings.length} warning(s): ${warnings.slice(0, 3).join('; ')}${warnings.length > 3 ? '…' : ''}` : ''),
+    warnings.length ? 'Done, with warnings' : 'Done', warnings.length ? 15 : 5
   );
 }
 

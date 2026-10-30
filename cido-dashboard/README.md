@@ -30,6 +30,26 @@ Protection & WASH project (Akobo & Nyirol, Jonglei). Pulled locally with `clasp`
 Status rules (On Track ≥ 90% of expected pace, At Risk ≥ 60%, Lagging below that) are the same
 in `Code.js` and `App.html` — change both together.
 
+## Raw_Data layout
+
+Headers on row 8, data from row 9. `buildDashboardFeed()` finds the County, Target and month
+columns by their headers.
+
+| A | B | C | D | E | F | G → |
+|---|---|---|---|---|---|---|
+| ID | Short name | Disagg | Unit | **County** | Target | 24 month columns |
+
+- **One row per indicator × disaggregation × county.** An indicator running in both counties has
+  an Akobo row and a Nyirol row for each disaggregation (Total, Male, Female, Boy, Girl).
+- **Target is that county's target.** If a row's Target is blank, the `Activities_Master` target
+  is split evenly across that indicator's county rows.
+- A blank County falls back to the county in `Activities_Master`; for "Both" indicators it shows
+  as **Unspecified** so it can't be double-counted.
+- After each build, a toast reports any warnings (missing counties, county targets that don't add
+  up to the `Activities_Master` target). Full list: Apps Script editor → **Executions**.
+- Without a County column the build falls back to the old behaviour (same values shown under each
+  assigned county).
+
 ## Workflow
 
 ```bash
