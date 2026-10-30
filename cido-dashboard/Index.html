@@ -5,391 +5,240 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CIDO Project Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <style>
-    :root {
-      --cido-green: #22b24c;
-      --cido-green-dark: #178a3a;
-      --cido-orange: #f58220;
-      --text-dark: #1f2937;
-      --text-muted: #6b7280;
-      --bg-light: #f3f4f6;
-      --white: #ffffff;
-      --red: #e11d48;
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-
-    body { background-color: var(--bg-light); color: var(--text-dark); padding-bottom: 40px; }
-
-    /* Header */
-    .header { background-color: var(--cido-green-dark); color: white; padding: 15px 30px; display: flex; align-items: center; gap: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-    .header img { height: 50px; background: white; padding: 5px; border-radius: 8px; }
-    .header-text h1 { font-size: 20px; font-weight: 700; margin-bottom: 2px; }
-    .header-text p { font-size: 13px; opacity: 0.9; }
-
-    /* Container */
-    .container { max-width: 1400px; margin: 25px auto; padding: 0 20px; }
-
-    /* Filters */
-    .filters { background: var(--white); padding: 15px 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; gap: 20px; margin-bottom: 25px; flex-wrap: wrap; align-items: center; }
-    .filter-group { display: flex; flex-direction: column; gap: 5px; }
-    .filter-group label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-    .filter-group select { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; color: var(--text-dark); outline: none; min-width: 180px; }
-    .filter-group select:focus { border-color: var(--cido-green); }
-
-    /* KPI Cards */
-    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 25px; }
-    .kpi-card { background: var(--white); padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-top: 4px solid var(--cido-green); position: relative; }
-    .kpi-card.orange { border-top-color: var(--cido-orange); }
-    .kpi-card.red { border-top-color: var(--red); }
-    .kpi-label { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; }
-    .kpi-value { font-size: 32px; font-weight: 800; color: var(--text-dark); }
-    .kpi-sub { font-size: 12px; color: var(--text-muted); margin-top: 5px; }
-
-    /* Charts Row */
-    .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
-    .chart-card { background: var(--white); padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .chart-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 15px; color: var(--text-dark); border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; }
-    .chart-container { position: relative; height: 300px; width: 100%; }
-
-    /* Table */
-    .table-card { background: var(--white); padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow-x: auto; }
-    .table-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 15px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; padding: 12px; background: #f9fafb; color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 11px; border-bottom: 2px solid #e5e7eb; }
-    td { padding: 12px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
-    tr:hover { background: #f9fafb; }
-
-    .status-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; white-space: nowrap; }
-    .status-on-track { background: #d1fae5; color: #065f46; }
-    .status-at-risk { background: #fef3c7; color: #78350f; }
-    .status-lagging { background: #fee2e2; color: #991b1b; }
-    .status-completed { background: #dbeafe; color: #1e40af; }
-    .status-not-started { background: #f3f4f6; color: #4b5563; }
-
-    .progress-wrapper { display: flex; align-items: center; gap: 10px; min-width: 140px; }
-    .progress-bar { flex: 1; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; }
-    .progress-fill { height: 100%; border-radius: 4px; }
-    .progress-text { font-size: 12px; font-weight: 700; width: 40px; text-align: right; }
-
-    /* Loading */
-    #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: flex; justify-content: center; align-items: center; flex-direction: column; z-index: 9999; }
-    .spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--cido-green); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 15px; }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-    @media (max-width: 900px) { .charts-row { grid-template-columns: 1fr; } }
-  </style>
+  <?!= include('Styles'); ?>
 </head>
 <body>
 
   <!-- Loading Screen -->
   <div id="loading">
     <div class="spinner"></div>
-    <div style="font-weight: 600; color: var(--cido-green-dark);">Loading Project Data...</div>
+    <div class="loading-text">Loading project data…</div>
   </div>
 
   <!-- Header -->
-  <div class="header">
-    <!-- Replace 'YOUR_LOGO_URL_HERE' with a direct link to your CIDO logo if you want it to show.
-         For now, it will show a placeholder text. -->
-    <div style="background: white; padding: 8px 12px; border-radius: 8px; color: var(--cido-green); font-weight: 800; font-size: 20px;">CIDO</div>
-    <div class="header-text">
-      <h1>Integrated Health, Protection & WASH Project</h1>
-      <p>Akobo (Bilkey, Dengjock) & Nyirol (Pulturuk, Thol, Lankien) — Jonglei State, South Sudan</p>
-    </div>
-  </div>
-
-  <div class="container">
-
-    <!-- Filters -->
-    <div class="filters">
-      <div class="filter-group">
-        <label>County</label>
-        <select id="filterCounty" onchange="applyFilters()">
-          <option value="All">All Counties</option>
-          <option value="Akobo">Akobo</option>
-          <option value="Nyirol">Nyirol</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <label>Sector</label>
-        <select id="filterSector" onchange="applyFilters()">
-          <option value="All">All Sectors</option>
-          <option value="Health">Health</option>
-          <option value="Protection">Protection</option>
-          <option value="WASH">WASH</option>
-          <option value="Accountability">Accountability</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <label>Month</label>
-        <select id="filterMonth" onchange="applyFilters()">
-          <!-- Populated by JS -->
-        </select>
+  <header class="header">
+    <div class="brand">
+      <div class="logo">CIDO</div>
+      <div class="header-text">
+        <h1>Integrated Health, Protection &amp; WASH Project</h1>
+        <p>Akobo (Bilkey, Dengjock) &amp; Nyirol (Pulturuk, Thol, Lankien) — Jonglei State, South Sudan</p>
       </div>
     </div>
+    <div class="header-meta">
+      <span id="dataThrough" class="pill"></span>
+      <button id="themeToggle" class="icon-btn" type="button" aria-label="Switch light/dark theme" title="Switch light/dark theme">◐</button>
+    </div>
+  </header>
+
+  <!-- Filters: one row, scopes everything below -->
+  <section class="filters" aria-label="Filters">
+    <div class="filter-group">
+      <label for="filterPreset">Period</label>
+      <select id="filterPreset">
+        <option value="todate">Project to date</option>
+        <option value="last3">Last 3 months</option>
+        <option value="last6">Last 6 months</option>
+        <option value="last12">Last 12 months</option>
+        <option value="y1">Year 1 (months 1–12)</option>
+        <option value="y2">Year 2 (months 13–24)</option>
+        <option value="custom">Custom range</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="filterFrom">From</label>
+      <select id="filterFrom"></select>
+    </div>
+    <div class="filter-group">
+      <label for="filterTo">To (as of)</label>
+      <select id="filterTo"></select>
+    </div>
+    <div class="filter-group">
+      <label for="filterCounty">County</label>
+      <select id="filterCounty">
+        <option value="All">All counties</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="filterGroup">Population group</label>
+      <select id="filterGroup">
+        <option value="Total">Total</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Sector</label>
+      <div class="multi" id="multiSector"></div>
+    </div>
+    <div class="filter-group">
+      <label>Indicator</label>
+      <div class="multi" id="multiIndicator"></div>
+    </div>
+    <div class="filter-group">
+      <label>Status</label>
+      <div class="multi" id="multiStatus"></div>
+    </div>
+    <div class="filter-group filter-actions">
+      <button id="resetFilters" class="btn-ghost" type="button">Reset</button>
+    </div>
+  </section>
+  <div id="activeFilters" class="active-filters" aria-live="polite"></div>
+
+  <main class="container" id="content">
 
     <!-- KPIs -->
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-label">Total Target (Beneficiaries)</div>
-        <div class="kpi-value" id="kpiTarget">0</div>
-        <div class="kpi-sub">Overall target for selected view</div>
+    <section class="kpi-grid">
+      <div class="kpi-card kpi-hero">
+        <div class="kpi-label">Average progress toward target</div>
+        <div class="kpi-hero-value" id="kpiProgress">–</div>
+        <div class="kpi-sub" id="kpiProgressSub"></div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Achieved to Date</div>
-        <div class="kpi-value" id="kpiAchieved" style="color: var(--cido-green-dark);">0</div>
-        <div class="kpi-sub">Cumulative achievement</div>
+        <div class="kpi-label">Indicators by status</div>
+        <div class="kpi-value" id="kpiIndicators">–</div>
+        <div class="segbar" id="kpiStatusBar" role="img"></div>
+        <div class="seg-legend" id="kpiStatusLegend"></div>
       </div>
-      <div class="kpi-card orange">
-        <div class="kpi-label">Overall Achievement %</div>
-        <div class="kpi-value" id="kpiPct">0%</div>
-        <div class="kpi-sub">Percentage of target met</div>
+      <div class="kpi-card">
+        <div class="kpi-label">Needing attention</div>
+        <div class="kpi-value" id="kpiAttention">–</div>
+        <div class="kpi-sub">At risk or lagging against expected pace</div>
       </div>
-      <div class="kpi-card red">
-        <div class="kpi-label">Indicators Lagging</div>
-        <div class="kpi-value" id="kpiLagging">0</div>
-        <div class="kpi-sub">Activities needing attention</div>
+      <div class="kpi-card">
+        <div class="kpi-label">Reporting coverage</div>
+        <div class="kpi-value" id="kpiCoverage">–</div>
+        <div class="kpi-sub" id="kpiCoverageSub">Indicators with data in the period</div>
       </div>
-    </div>
+    </section>
 
-    <!-- Charts -->
-    <div class="charts-row">
-      <div class="chart-card">
-        <h3>Achievement by Sector</h3>
-        <div class="chart-container"><canvas id="sectorChart"></canvas></div>
+    <!-- Trends -->
+    <section class="charts-row">
+      <div class="chart-card" data-chart="progressTrend">
+        <div class="card-head">
+          <div>
+            <h3>Progress trend</h3>
+            <p class="card-sub">Average cumulative % of target vs the expected pace (each indicator capped at 100%)</p>
+          </div>
+          <button class="btn-ghost btn-sm table-toggle" type="button">Table</button>
+        </div>
+        <div class="chart-container"><canvas id="progressTrendChart"></canvas></div>
+        <div class="chart-table" hidden></div>
       </div>
-      <div class="chart-card">
-        <h3>Indicator Performance (Target vs Achieved)</h3>
-        <div class="chart-container"><canvas id="indicatorChart"></canvas></div>
+
+      <div class="chart-card" data-chart="statusTrend">
+        <div class="card-head">
+          <div>
+            <h3>Status over time</h3>
+            <p class="card-sub">Number of indicators in each status, month by month</p>
+          </div>
+          <button class="btn-ghost btn-sm table-toggle" type="button">Table</button>
+        </div>
+        <div class="chart-container"><canvas id="statusTrendChart"></canvas></div>
+        <div class="chart-table" hidden></div>
       </div>
-    </div>
+    </section>
+
+    <section class="chart-card chart-wide" data-chart="compare">
+      <div class="card-head">
+        <div>
+          <h3>Compare indicators over time</h3>
+          <p class="card-sub" id="compareSub">Pick up to 4 indicators — or click a row in the table below</p>
+        </div>
+        <div class="card-tools">
+          <div class="seg-toggle" role="group" aria-label="Measure">
+            <button type="button" data-mode="pct" class="active">% of target</button>
+            <button type="button" data-mode="cum">Cumulative</button>
+            <button type="button" data-mode="monthly">Monthly</button>
+          </div>
+          <button class="btn-ghost btn-sm table-toggle" type="button">Table</button>
+        </div>
+      </div>
+      <div class="compare-picker" id="comparePicker"></div>
+      <div class="chart-note" id="compareNote" hidden></div>
+      <div class="chart-container chart-tall"><canvas id="compareChart"></canvas></div>
+      <div class="chart-table" hidden></div>
+    </section>
+
+    <!-- Breakdowns -->
+    <section class="charts-row">
+      <div class="chart-card" data-chart="breakdown">
+        <div class="card-head">
+          <div>
+            <h3 id="breakdownTitle">Progress by sector</h3>
+            <p class="card-sub">% of target achieved; the tick marks the expected pace</p>
+          </div>
+          <div class="card-tools">
+            <div class="seg-toggle" role="group" aria-label="Breakdown">
+              <button type="button" data-by="Sector" class="active">Sector</button>
+              <button type="button" data-by="County">County</button>
+            </div>
+            <button class="btn-ghost btn-sm table-toggle" type="button">Table</button>
+          </div>
+        </div>
+        <div class="chart-container"><canvas id="breakdownChart"></canvas></div>
+        <div class="chart-table" hidden></div>
+      </div>
+
+      <div class="chart-card" data-chart="groups">
+        <div class="card-head">
+          <div>
+            <h3>Who was reached</h3>
+            <p class="card-sub">Share of each indicator's achievement in the period, by sex and age</p>
+          </div>
+          <button class="btn-ghost btn-sm table-toggle" type="button">Table</button>
+        </div>
+        <div class="chart-container" id="groupsContainer"><canvas id="groupsChart"></canvas></div>
+        <div class="chart-table" hidden></div>
+      </div>
+    </section>
+
+    <section class="chart-card chart-wide" data-chart="indicators">
+      <div class="card-head">
+        <div>
+          <h3>Progress by indicator</h3>
+          <p class="card-sub">% of target achieved, coloured by status; the line marks the expected pace</p>
+        </div>
+        <button class="btn-ghost btn-sm table-toggle" type="button">Table</button>
+      </div>
+      <div class="chart-container" id="indicatorContainer"><canvas id="indicatorChart"></canvas></div>
+      <div class="chart-table" hidden></div>
+    </section>
 
     <!-- Table -->
-    <div class="table-card">
-      <h3>Activity Tracking Matrix</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Indicator</th>
-            <th>Sector</th>
-            <th>County</th>
-            <th>Target</th>
-            <th>Achieved</th>
-            <th>Progress</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody id="tableBody">
-          <!-- Populated by JS -->
-        </tbody>
-      </table>
-    </div>
+    <section class="table-card">
+      <div class="card-head">
+        <div>
+          <h3>Activity tracking matrix</h3>
+          <p class="card-sub">Click a column to sort · click a row to add it to the comparison chart</p>
+        </div>
+        <div class="card-tools">
+          <input id="tableSearch" type="search" placeholder="Search indicators…" aria-label="Search indicators">
+          <button id="exportCsv" class="btn-ghost btn-sm" type="button">Export CSV</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table id="matrix">
+          <thead>
+            <tr>
+              <th data-sort="short">Indicator</th>
+              <th data-sort="sector">Sector</th>
+              <th data-sort="counties">County</th>
+              <th data-sort="unit">Unit</th>
+              <th data-sort="target" class="num">Target</th>
+              <th data-sort="period" class="num">In period</th>
+              <th data-sort="cum" class="num">Achieved to date</th>
+              <th data-sort="pct">Progress</th>
+              <th>Trend</th>
+              <th data-sort="status">Status</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </section>
 
-  </div>
+  </main>
 
-  <script>
-    // Global variables
-    let rawData = [];
-    let allMonths = [];
-    let sectorChartInstance = null;
-    let indicatorChartInstance = null;
+  <div id="tooltip" class="tooltip" hidden></div>
 
-    // 1. Fetch data from Google Apps Script
-    window.onload = function() {
-      google.script.run
-        .withSuccessHandler(onDataLoaded)
-        .withFailureHandler(function(err) { alert('Error loading data: ' + err); })
-        .getDashboardData();
-    };
-
-    function onDataLoaded(data) {
-      // Filter out empty rows just in case
-      rawData = data.filter(row => row['Indicator_ID'] !== '');
-
-      // Extract unique months and sort them by Month_Number
-      const monthMap = new Map();
-      rawData.forEach(row => {
-        if (row['Month_Number'] && row['Month_Label']) {
-          monthMap.set(row['Month_Number'], row['Month_Label']);
-        }
-      });
-      allMonths = Array.from(monthMap.entries()).sort((a, b) => a[0] - b[0]);
-
-      // Populate Month dropdown
-      const monthSelect = document.getElementById('filterMonth');
-      allMonths.forEach(([num, label]) => {
-        const option = document.createElement('option');
-        option.value = num;
-        option.textContent = label;
-        monthSelect.appendChild(option);
-      });
-
-    // Set default month to the LATEST available month
-            // Set default month to the LATEST month that has actual data
-      let latestDataMonth = allMonths[0][0]; // Default to first month
-
-    // Loop through raw data to find the highest month number with a value > 0
-      rawData.forEach(row => {
-        if (row['Disagg'] === 'Total' && Number(row['Cumulative_Achieved']) > 0) {
-          if (row['Month_Number'] > latestDataMonth) {
-            latestDataMonth = row['Month_Number'];
-          }
-        }
-      });
-
-    // If we found a month with data, set it. Otherwise, keep it at the current month.
-      monthSelect.value = latestDataMonth;
-
-    // Hide loading, render dashboard
-      document.getElementById('loading').style.display = 'none';
-      applyFilters();
-    }
-
-    // 2. Filter and Render
-    function applyFilters() {
-      const countyFilter = document.getElementById('filterCounty').value;
-      const sectorFilter = document.getElementById('filterSector').value;
-      const monthFilter = parseInt(document.getElementById('filterMonth').value);
-
-      // We only want "Total" disagg rows for the main dashboard to avoid double-counting
-      let filtered = rawData.filter(row => row['Disagg'] === 'Total');
-
-      // Apply Month Filter
-      filtered = filtered.filter(row => row['Month_Number'] === monthFilter);
-
-      // Apply County Filter
-      if (countyFilter !== 'All') {
-        filtered = filtered.filter(row => row['County'] === countyFilter);
-      }
-
-      // Apply Sector Filter
-      if (sectorFilter !== 'All') {
-        filtered = filtered.filter(row => row['Sector'] === sectorFilter);
-      }
-
-      // --- Update KPIs ---
-      let totalTarget = 0;
-      let totalAchieved = 0;
-      let laggingCount = 0;
-
-      filtered.forEach(row => {
-        totalTarget += Number(row['Target'] || 0);
-        totalAchieved += Number(row['Cumulative_Achieved'] || 0);
-        if (row['Status_RAG'] === 'Lagging') laggingCount++;
-      });
-
-      const overallPct = totalTarget > 0 ? (totalAchieved / totalTarget) * 100 : 0;
-
-      document.getElementById('kpiTarget').textContent = totalTarget.toLocaleString();
-      document.getElementById('kpiAchieved').textContent = totalAchieved.toLocaleString();
-      document.getElementById('kpiPct').textContent = overallPct.toFixed(1) + '%';
-      document.getElementById('kpiLagging').textContent = laggingCount;
-
-      // --- Update Table ---
-      const tbody = document.getElementById('tableBody');
-      tbody.innerHTML = '';
-
-      if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: #6b7280; padding: 20px;">No data available for this selection.</td></tr>';
-      } else {
-        filtered.sort((a, b) => b['%_Achieved'] - a['%_Achieved']); // Sort highest progress first
-
-        filtered.forEach(row => {
-          const pct = (row['%_Achieved'] * 100).toFixed(1);
-          const statusClass = row['Status_RAG'] === 'On Track' ? 'status-on-track' :
-                              row['Status_RAG'] === 'At Risk' ? 'status-at-risk' :
-                              row['Status_RAG'] === 'Lagging' ? 'status-lagging' :
-                              row['Status_RAG'] === 'Not Started' ? 'status-not-started' : 'status-completed';
-          const statusLabel = row['Status_RAG'] || 'Not Started';
-
-          let barColor = row['Status_RAG'] === 'On Track' ? 'var(--cido-green)' :
-                         row['Status_RAG'] === 'At Risk' ? 'var(--cido-orange)' :
-                         row['Status_RAG'] === 'Lagging' ? 'var(--red)' : '#9ca3af';
-
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td style="font-weight:600; color:var(--text-dark);">${row['Short_Name']}</td>
-            <td>${row['Sector']}</td>
-            <td>${row['County']}</td>
-            <td>${Number(row['Target']).toLocaleString()}</td>
-            <td>${Number(row['Cumulative_Achieved']).toLocaleString()}</td>
-            <td>
-              <div class="progress-wrapper">
-                <div class="progress-bar"><div class="progress-fill" style="width:${pct}%; background:${barColor};"></div></div>
-                <div class="progress-text" style="color:${barColor};">${pct}%</div>
-              </div>
-            </td>
-            <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
-          `;
-          tbody.appendChild(tr);
-        });
-      }
-
-      // --- Update Charts ---
-      updateCharts(filtered);
-    }
-
-    function updateCharts(filteredData) {
-      // 1. Sector Chart (Doughnut)
-      const sectorTotals = { Health: 0, Protection: 0, WASH: 0, Accountability: 0 };
-      filteredData.forEach(row => {
-        if (sectorTotals[row['Sector']] !== undefined) {
-          sectorTotals[row['Sector']] += Number(row['Cumulative_Achieved'] || 0);
-        }
-      });
-
-      const ctx1 = document.getElementById('sectorChart').getContext('2d');
-      if (sectorChartInstance) sectorChartInstance.destroy();
-
-      sectorChartInstance = new Chart(ctx1, {
-        type: 'doughnut',
-        data: {
-          labels: ['Health', 'Protection', 'WASH', 'Accountability'],
-          datasets: [{
-            data: [sectorTotals.Health, sectorTotals.Protection, sectorTotals.WASH, sectorTotals.Accountability],
-            backgroundColor: ['#22b24c', '#f58220', '#0891b2', '#7c3aed'],
-            borderWidth: 2,
-            borderColor: '#ffffff'
-          }]
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: {
-            legend: { position: 'bottom', labels: { usePointStyle: true, padding: 20 } }
-          }
-        }
-      });
-
-      // 2. Indicator Chart (Horizontal Bar)
-      // Sort by highest target, take top 10 for readability
-      const sortedData = [...filteredData].sort((a, b) => b['Target'] - a['Target']).slice(0, 10);
-
-      const ctx2 = document.getElementById('indicatorChart').getContext('2d');
-      if (indicatorChartInstance) indicatorChartInstance.destroy();
-
-      indicatorChartInstance = new Chart(ctx2, {
-        type: 'bar',
-        data: {
-          labels: sortedData.map(r => r['Short_Name']),
-          datasets: [
-            { label: 'Target', data: sortedData.map(r => Number(r['Target'])), backgroundColor: '#d1d5db', borderRadius: 4 },
-            { label: 'Achieved', data: sortedData.map(r => Number(r['Cumulative_Achieved'])), backgroundColor: '#22b24c', borderRadius: 4 }
-          ]
-        },
-        options: {
-          indexAxis: 'y',
-          responsive: true, maintainAspectRatio: false,
-          plugins: {
-            legend: { position: 'top' }
-          },
-          scales: {
-            x: { beginAtZero: true, grid: { color: '#f3f4f6' } },
-            y: { grid: { display: false } }
-          }
-        }
-      });
-    }
-  </script>
+  <?!= include('App'); ?>
 </body>
 </html>

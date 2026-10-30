@@ -28,3 +28,6 @@ build/
 
 # Claude Code local-only settings
 .claude/settings.local.json
+
+# Local dashboard preview (generated)
+preview/

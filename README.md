@@ -32,7 +32,7 @@ Keep a running list here (update as you go):
 
 | Folder | What it explores | Status |
 |--------|------------------|--------|
-| _none yet_ | | |
+| [cido-dashboard](cido-dashboard/) | Redesigning a Google Sheets + Apps Script M&E dashboard (filters, trend charts, look) | In progress |
 
 ## Tips for using Claude Code here
 

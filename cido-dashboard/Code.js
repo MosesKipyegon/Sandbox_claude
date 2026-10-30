@@ -65,7 +65,7 @@ function buildDashboardFeed() {
     }
 
     const countiesToRun = assignedCounty === 'Both' ? ['Akobo', 'Nyirol'] : [assignedCounty];
-
+    
     countiesToRun.forEach(county => {
       let running = 0;
 
@@ -92,7 +92,7 @@ function buildDashboardFeed() {
           if (pctAchieved !== '') {
             // 1. Calculate what the target SHOULD be at this month
             const expectedTarget = target * expectedPct;
-
+            
             // 2. Compare actual cumulative to the expected target
             if (pctAchieved >= 1) {
               statusRAG = 'Completed';
@@ -155,24 +155,37 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
+
+/**
+ * Inlines another HTML file (Styles, App) into Index via <?!= include('Name') ?>
+ */
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
 /**
  * Fetches the data from Dashboard_Feed to send to the HTML
  */
 function getDashboardData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('Dashboard_Feed');
+  if (!sheet || sheet.getLastRow() < 2) return [];
   const lastRow = sheet.getLastRow();
 
-  // Get all data (15 columns, skipping the header)
+  // Get all data (15 columns, skipping the header).
+  // Display values for Month_Label so dates never reach the client as Date objects
+  // (google.script.run cannot serialise them).
   const data = sheet.getRange(2, 1, lastRow - 1, 15).getValues();
-
+  const labels = sheet.getRange(2, 9, lastRow - 1, 1).getDisplayValues();
+  data.forEach((row, i) => { row[8] = labels[i][0]; });
+  
   // Convert to an array of objects for the HTML
   const headers = [
-    'Indicator_ID', 'Indicator_Name', 'Short_Name', 'Sector', 'County',
-    'Disagg', 'Unit', 'Month_Number', 'Month_Label', 'Value',
+    'Indicator_ID', 'Indicator_Name', 'Short_Name', 'Sector', 'County', 
+    'Disagg', 'Unit', 'Month_Number', 'Month_Label', 'Value', 
     'Target', 'Cumulative_Achieved', '%_Achieved', 'Expected_%', 'Status_RAG'
   ];
-
+  
   return data.map(row => {
     let obj = {};
     headers.forEach((header, index) => {

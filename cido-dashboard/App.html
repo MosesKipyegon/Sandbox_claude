@@ -1,0 +1,1127 @@
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Constants ----------
+  const SUBGROUPS = ['Male', 'Female', 'Boy', 'Girl'];
+  const GROUP_VAR = { Male: '--g-male', Female: '--g-female', Boy: '--g-boy', Girl: '--g-girl' };
+  const SECTOR_ORDER = ['Health', 'Protection', 'WASH', 'Accountability'];
+  const STATUSES = ['Completed', 'On Track', 'At Risk', 'Lagging', 'Not Started', 'No target'];
+  const STATUS_VAR = {
+    'Completed': '--st-completed', 'On Track': '--st-ontrack', 'At Risk': '--st-atrisk',
+    'Lagging': '--st-lagging', 'Not Started': '--st-notstarted', 'No target': '--st-notstarted'
+  };
+  const SERIES_VARS = ['--s1', '--s2', '--s3', '--s4'];
+  const MAX_COMPARE = 4;
+
+  // ---------- State ----------
+  const S = {
+    series: [],          // one per indicator × county × disagg: {id,name,short,sector,county,disagg,unit,target,values[]}
+    months: [],          // [{num,label}]
+    N: 24,               // project length in months
+    latest: 1,           // last month with any reported data
+    indicators: [],      // unique indicators {id,short,name,sector,unit}
+    counties: [],
+    groups: [],
+    f: null,             // filters (see defaultFilters)
+    compare: [],         // [{id, slot}] — slot keeps an indicator's colour fixed while others come and go
+    compareMode: 'pct',
+    breakdownBy: 'Sector',
+    sort: { key: 'pct', dir: -1 },
+    search: '',
+    charts: {},
+    tables: {},          // chart-card table twins: key -> {head, rows}
+    tableOn: {}
+  };
+
+  function defaultFilters() {
+    return {
+      preset: 'todate', from: 1, to: S.latest, county: 'All', group: 'Total',
+      sectors: new Set(), indicators: new Set(), statuses: new Set()
+    };
+  }
+
+  // ---------- Helpers ----------
+  const $ = id => document.getElementById(id);
+  const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = n => (n == null || isNaN(n)) ? '–' : Math.round(n).toLocaleString();
+  const fmtPct = (r, d = 1) => (r == null || isNaN(r)) ? '–' : (r * 100).toFixed(d) + '%';
+  const monthLabel = m => (S.months[m - 1] || {}).label || ('Month ' + m);
+  const range = (a, b) => { const out = []; for (let i = a; i <= b; i++) out.push(i); return out; };
+
+  /** Same RAG rules as buildDashboardFeed() in Code.js */
+  function statusFor(cum, target, m) {
+    if (!(target > 0)) return 'No target';
+    const expectedTarget = target * (m / S.N);
+    if (cum / target >= 1) return 'Completed';
+    if (expectedTarget === 0) return 'On Track';
+    if (cum >= expectedTarget * 0.9) return 'On Track';
+    if (cum >= expectedTarget * 0.6) return 'At Risk';
+    if (cum > 0) return 'Lagging';
+    return 'Not Started';
+  }
+
+  function runningTotals(values) {
+    const out = []; let run = 0;
+    values.forEach(v => { run += v; out.push(run); });
+    return out;
+  }
+
+  // ---------- Load ----------
+  window.addEventListener('load', function () {
+    initTheme();
+    if (window.google && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(onDataLoaded)
+        .withFailureHandler(err => showError('Error loading data: ' + (err && err.message ? err.message : err)))
+        .getDashboardData();
+    } else if (window.__MOCK_DATA__) {
+      setTimeout(() => onDataLoaded(window.__MOCK_DATA__), 250); // local preview
+    } else {
+      showError('No data source found.');
+    }
+  });
+
+  function showError(msg) {
+    const l = $('loading');
+    l.textContent = '';
+    const d = document.createElement('div');
+    d.className = 'loading-text';
+    d.textContent = msg;
+    l.appendChild(d);
+  }
+
+  function onDataLoaded(data) {
+    const rows = (data || []).filter(r => r && r['Indicator_ID'] !== '' && r['Indicator_ID'] != null);
+    if (!rows.length) { showError('Dashboard_Feed is empty — run buildDashboardFeed() in the sheet first.'); return; }
+
+    // Months
+    const monthMap = new Map();
+    rows.forEach(r => { if (r['Month_Number']) monthMap.set(Number(r['Month_Number']), String(r['Month_Label'] || '')); });
+    S.N = Math.max.apply(null, Array.from(monthMap.keys()));
+    S.months = range(1, S.N).map(n => ({ num: n, label: monthMap.get(n) || ('Month ' + n) }));
+
+    // Series
+    const seriesMap = new Map();
+    const indMap = new Map();
+    rows.forEach(r => {
+      const id = String(r['Indicator_ID']);
+      const key = id + '|' + r['County'] + '|' + r['Disagg'];
+      let s = seriesMap.get(key);
+      if (!s) {
+        s = {
+          id, name: r['Indicator_Name'] || '', short: r['Short_Name'] || id, sector: r['Sector'] || 'Other',
+          county: r['County'] || '', disagg: r['Disagg'] || 'Total', unit: r['Unit'] || '',
+          target: Number(r['Target']) || 0, values: new Array(S.N).fill(0)
+        };
+        seriesMap.set(key, s);
+      }
+      const m = Number(r['Month_Number']);
+      if (m >= 1 && m <= S.N) s.values[m - 1] = Number(r['Value']) || 0;
+      if (!indMap.has(id)) indMap.set(id, { id, short: s.short, name: s.name, sector: s.sector, unit: s.unit });
+    });
+    S.series = Array.from(seriesMap.values());
+    S.indicators = Array.from(indMap.values()).sort((a, b) => sectorRank(a.sector) - sectorRank(b.sector) || a.short.localeCompare(b.short));
+    S.counties = uniq(S.series.map(s => s.county)).sort();
+    S.groups = ['Total'].concat(SUBGROUPS.filter(g => S.series.some(s => s.disagg === g)));
+
+    // Latest month with any reported value
+    S.latest = 1;
+    S.series.forEach(s => s.values.forEach((v, i) => { if (v > 0 && i + 1 > S.latest) S.latest = i + 1; }));
+
+    S.f = defaultFilters();
+    $('dataThrough').textContent = 'Data through ' + monthLabel(S.latest) + ' · month ' + S.latest + ' of ' + S.N;
+
+    buildFilterControls();
+    wireUi();
+    S.compare = defaultCompare();
+    $('loading').style.display = 'none';
+    render();
+  }
+
+  function uniq(arr) { return Array.from(new Set(arr.filter(x => x !== '' && x != null))); }
+  function sectorRank(s) { const i = SECTOR_ORDER.indexOf(s); return i < 0 ? 99 : i; }
+
+  // ---------- View model ----------
+  /** Applies filters and aggregates counties into one record per indicator. */
+  function buildView() {
+    const f = S.f;
+    const base = S.series.filter(s =>
+      s.disagg === f.group &&
+      (f.county === 'All' || s.county === f.county) &&
+      (!f.sectors.size || f.sectors.has(s.sector)) &&
+      (!f.indicators.size || f.indicators.has(s.id)));
+
+    const byInd = new Map();
+    base.forEach(s => {
+      let a = byInd.get(s.id);
+      if (!a) {
+        a = { id: s.id, name: s.name, short: s.short, sector: s.sector, unit: s.unit, target: 0, values: new Array(S.N).fill(0), counties: [] };
+        byInd.set(s.id, a);
+      }
+      a.target += s.target;
+      s.values.forEach((v, i) => { a.values[i] += v; });
+      a.counties.push(s.county);
+    });
+
+    let inds = Array.from(byInd.values()).map(enrich);
+    if (f.statuses.size) {
+      inds = inds.filter(i => f.statuses.has(i.status));
+      const keep = new Set(inds.map(i => i.id));
+      return { inds, base: base.filter(s => keep.has(s.id)) };
+    }
+    return { inds, base };
+  }
+
+  function enrich(a) {
+    const f = S.f;
+    a.cumByMonth = runningTotals(a.values);
+    a.cum = a.cumByMonth[f.to - 1];
+    a.period = a.values.slice(f.from - 1, f.to).reduce((x, y) => x + y, 0);
+    a.pct = a.target > 0 ? a.cum / a.target : null;
+    a.expected = f.to / S.N;
+    a.status = statusFor(a.cum, a.target, f.to);
+    a.countiesLabel = uniq(a.counties).join(', ');
+    return a;
+  }
+
+  // ---------- Render ----------
+  function render() {
+    const view = buildView();
+    renderChips();
+    renderKpis(view);
+    renderProgressTrend(view);
+    renderStatusTrend(view);
+    renderCompare();
+    renderBreakdown(view);
+    renderGroups(view);
+    renderIndicatorChart(view);
+    renderTable(view);
+    Object.keys(S.tableOn).forEach(k => { if (S.tableOn[k]) showTable(k); });
+  }
+
+  // ---------- KPIs ----------
+  function renderKpis(view) {
+    const withTarget = view.inds.filter(i => i.target > 0);
+    const avg = withTarget.length ? withTarget.reduce((s, i) => s + Math.min(i.pct, 1), 0) / withTarget.length : null;
+    const expected = S.f.to / S.N;
+    $('kpiProgress').textContent = fmtPct(avg);
+
+    const sub = $('kpiProgressSub');
+    sub.textContent = '';
+    if (avg != null) {
+      const delta = (avg - expected) * 100;
+      const span = document.createElement('span');
+      span.className = delta >= 0 ? 'delta-good' : 'delta-bad';
+      span.textContent = (delta >= 0 ? '▲ ' : '▼ ') + Math.abs(delta).toFixed(1) + ' pts ' + (delta >= 0 ? 'ahead of' : 'behind') + ' pace';
+      sub.appendChild(span);
+      sub.appendChild(document.createTextNode(' · expected ' + fmtPct(expected, 0) + ' by ' + monthLabel(S.f.to)));
+    }
+
+    // Status distribution
+    const counts = {};
+    STATUSES.forEach(s => { counts[s] = 0; });
+    view.inds.forEach(i => { counts[i.status]++; });
+    $('kpiIndicators').textContent = view.inds.length;
+    const bar = $('kpiStatusBar'), legend = $('kpiStatusLegend');
+    bar.textContent = ''; legend.textContent = '';
+    const present = STATUSES.filter(s => counts[s] > 0);
+    bar.setAttribute('aria-label', present.map(s => s + ': ' + counts[s]).join(', ') || 'No indicators');
+    present.forEach(s => {
+      const seg = document.createElement('span');
+      seg.style.flex = counts[s];
+      seg.style.background = cssVar(STATUS_VAR[s]);
+      seg.addEventListener('pointermove', e => showTip(e, [[s, counts[s] + ' indicator' + (counts[s] === 1 ? '' : 's')]]));
+      seg.addEventListener('pointerleave', hideTip);
+      bar.appendChild(seg);
+      const l = document.createElement('span');
+      const key = document.createElement('i');
+      key.style.background = cssVar(STATUS_VAR[s]);
+      l.appendChild(key);
+      l.appendChild(document.createTextNode(s + ' ' + counts[s]));
+      legend.appendChild(l);
+    });
+
+    $('kpiAttention').textContent = counts['At Risk'] + counts['Lagging'];
+    const reported = view.inds.filter(i => i.period > 0).length;
+    $('kpiCoverage').textContent = view.inds.length ? Math.round(reported / view.inds.length * 100) + '%' : '–';
+    $('kpiCoverageSub').textContent = reported + ' of ' + view.inds.length + ' indicators reported data, ' + monthLabel(S.f.from) + ' – ' + monthLabel(S.f.to);
+  }
+
+  // ---------- Chart plumbing ----------
+  function applyChartTheme() {
+    if (!window.Chart) return;
+    const d = Chart.defaults;
+    d.font.family = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+    d.font.size = 12;
+    d.color = cssVar('--text-secondary');
+    d.borderColor = cssVar('--grid');
+    d.animation.duration = 300;
+    d.maintainAspectRatio = false;
+    d.plugins.legend.position = 'bottom';
+    d.plugins.legend.labels.usePointStyle = true;
+    d.plugins.legend.labels.boxWidth = 8;
+    d.plugins.legend.labels.boxHeight = 8;
+    d.plugins.legend.labels.padding = 16;
+    d.plugins.legend.labels.color = cssVar('--text-secondary');
+    Object.assign(d.plugins.tooltip, {
+      backgroundColor: cssVar('--surface'), titleColor: cssVar('--text-secondary'), bodyColor: cssVar('--text-primary'),
+      borderColor: cssVar('--border'), borderWidth: 1, padding: 10, cornerRadius: 8, boxPadding: 6,
+      usePointStyle: true, titleFont: { weight: '600' }, bodyFont: { weight: '600' }
+    });
+  }
+
+  function axis(extra) {
+    return Object.assign({
+      grid: { color: cssVar('--grid'), drawTicks: false },
+      border: { color: cssVar('--axis') },
+      ticks: { color: cssVar('--text-muted'), padding: 6 }
+    }, extra || {});
+  }
+
+  function makeChart(key, canvasId, config) {
+    if (S.charts[key]) S.charts[key].destroy();
+    S.charts[key] = new Chart($(canvasId).getContext('2d'), config);
+  }
+
+  /** Vertical hairline that follows the hovered X on line charts. */
+  const crosshair = {
+    id: 'crosshair',
+    afterDatasetsDraw(chart) {
+      const act = chart.tooltip && chart.tooltip.getActiveElements();
+      if (!act || !act.length) return;
+      const x = act[0].element.x, a = chart.chartArea, ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = cssVar('--axis'); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, a.top); ctx.lineTo(x, a.bottom); ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  /** Reference line (expected pace) on a value axis. Options: {value, axis, label} */
+  const refLine = {
+    id: 'refLine',
+    afterDatasetsDraw(chart, args, opts) {
+      if (!opts || opts.value == null) return;
+      const sc = chart.scales[opts.axis || 'x'];
+      if (!sc) return;
+      const p = sc.getPixelForValue(opts.value), a = chart.chartArea, ctx = chart.ctx;
+      if (p < a.left - 1 || p > a.right + 1) return;
+      ctx.save();
+      ctx.strokeStyle = cssVar('--expected'); ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(p, a.top); ctx.lineTo(p, a.bottom); ctx.stroke();
+      if (opts.label) {
+        ctx.setLineDash([]);
+        ctx.fillStyle = cssVar('--text-secondary');
+        ctx.font = '600 11px system-ui, -apple-system, "Segoe UI", sans-serif';
+        const w = ctx.measureText(opts.label).width;
+        const tx = p + 6 + w > a.right ? p - 6 - w : p + 6;
+        ctx.fillText(opts.label, tx, a.top - 4);
+      }
+      ctx.restore();
+    }
+  };
+
+  /** End-dot only on the last plotted point of a line. */
+  function endDot(data) {
+    let last = -1;
+    data.forEach((v, i) => { if (v != null) last = i; });
+    return ctx => ctx.dataIndex === last ? 4 : 0;
+  }
+
+  function lineDataset(label, data, color, extra) {
+    return Object.assign({
+      label, data, borderColor: color, backgroundColor: color, pointBackgroundColor: color, borderWidth: 2,
+      pointRadius: endDot(data), pointHoverRadius: 5, pointBorderColor: cssVar('--surface'),
+      pointBorderWidth: 2, pointHoverBorderWidth: 2, pointStyle: 'circle', tension: 0.25, spanGaps: false,
+      borderJoinStyle: 'round', borderCapStyle: 'round'
+    }, extra || {});
+  }
+
+  // Legend & tooltip keys mirror the line itself. (Chart.js would otherwise take the
+  // point's style, whose surface-coloured ring makes the key invisible.)
+  const lineLegend = {
+    labels: {
+      usePointStyle: true, pointStyleWidth: 20,
+      generateLabels: chart => Chart.defaults.plugins.legend.labels.generateLabels(chart).map(l => {
+        const ds = chart.data.datasets[l.datasetIndex];
+        return Object.assign(l, { pointStyle: 'line', strokeStyle: ds.borderColor, fillStyle: ds.borderColor, lineWidth: 2, lineDash: ds.borderDash || [] });
+      })
+    }
+  };
+  const lineKey = {
+    labelPointStyle: () => ({ pointStyle: 'line', rotation: 0 }),
+    labelColor: c => ({ borderColor: c.dataset.borderColor, backgroundColor: c.dataset.borderColor, borderWidth: 2, borderDash: c.dataset.borderDash || [] })
+  };
+
+  // ---------- Progress trend ----------
+  function renderProgressTrend(view) {
+    const months = range(S.f.from, S.f.to);
+    const withTarget = view.inds.filter(i => i.target > 0);
+    const actual = months.map(m => m > S.latest || !withTarget.length ? null :
+      withTarget.reduce((s, i) => s + Math.min(i.cumByMonth[m - 1] / i.target, 1), 0) / withTarget.length * 100);
+    const expected = months.map(m => m / S.N * 100);
+
+    makeChart('progressTrend', 'progressTrendChart', {
+      type: 'line',
+      data: {
+        labels: months.map(monthLabel),
+        datasets: [
+          lineDataset('Achieved (avg % of target)', actual, cssVar('--s1'), {
+            fill: 'origin', backgroundColor: hexA(cssVar('--s1'), 0.10)
+          }),
+          lineDataset('Expected pace', expected, cssVar('--expected'), { borderDash: [5, 4], pointRadius: 0, tension: 0 })
+        ]
+      },
+      options: {
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: axis({ grid: { display: false } }),
+          y: axis({ beginAtZero: true, ticks: { color: cssVar('--text-muted'), callback: v => v + '%' } })
+        },
+        plugins: {
+          legend: lineLegend,
+          tooltip: { callbacks: Object.assign({ label: c => ' ' + (c.parsed.y == null ? '–' : c.parsed.y.toFixed(1) + '%') + '  ' + c.dataset.label }, lineKey) }
+        }
+      },
+      plugins: [crosshair]
+    });
+
+    S.tables.progressTrend = {
+      head: ['Month', 'Achieved (avg %)', 'Expected %'],
+      rows: months.map((m, i) => [monthLabel(m), actual[i] == null ? '–' : actual[i].toFixed(1) + '%', expected[i].toFixed(1) + '%'])
+    };
+  }
+
+  // ---------- Status over time ----------
+  function renderStatusTrend(view) {
+    const months = range(S.f.from, Math.min(S.f.to, S.latest));
+    const counts = STATUSES.map(st => months.map(m => view.inds.filter(i => statusFor(i.cumByMonth[m - 1], i.target, m) === st).length));
+    const surface = cssVar('--surface');
+    const datasets = STATUSES.map((st, k) => ({
+      label: st, data: counts[k], backgroundColor: cssVar(STATUS_VAR[st]),
+      borderColor: surface, borderWidth: { top: 2 }, borderSkipped: 'bottom', borderRadius: 2, maxBarThickness: 24
+    })).filter(d => d.data.some(v => v > 0));
+
+    makeChart('statusTrend', 'statusTrendChart', {
+      type: 'bar',
+      data: { labels: months.map(monthLabel), datasets },
+      options: {
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: axis({ stacked: true, grid: { display: false } }),
+          y: axis({ stacked: true, beginAtZero: true, ticks: { color: cssVar('--text-muted'), precision: 0 } })
+        },
+        plugins: {
+          legend: { labels: { pointStyle: 'rect' } },
+          tooltip: { itemSort: (a, b) => a.datasetIndex - b.datasetIndex, callbacks: { label: c => ' ' + c.parsed.y + '  ' + c.dataset.label } }
+        }
+      }
+    });
+
+    S.tables.statusTrend = {
+      head: ['Month'].concat(datasets.map(d => d.label)),
+      rows: months.map((m, i) => [monthLabel(m)].concat(datasets.map(d => d.data[i])))
+    };
+  }
+
+  // ---------- Compare indicators ----------
+  function defaultCompare() {
+    const view = buildView();
+    return view.inds.filter(i => i.target > 0 && i.cum > 0)
+      .sort((a, b) => b.cum / b.target - a.cum / a.target)
+      .filter((i, k, arr) => arr.findIndex(x => x.sector === i.sector) === k) // one per sector for variety
+      .slice(0, 3)
+      .map((i, k) => ({ id: i.id, slot: k }));
+  }
+
+  function toggleCompare(id) {
+    const at = S.compare.findIndex(c => c.id === id);
+    if (at >= 0) { S.compare.splice(at, 1); }
+    else {
+      if (S.compare.length >= MAX_COMPARE) S.compare.shift();
+      const used = new Set(S.compare.map(c => c.slot));
+      const slot = [0, 1, 2, 3].find(s => !used.has(s));
+      S.compare.push({ id, slot });
+    }
+    renderCompare();
+    markCompareRows();
+  }
+
+  /** Comparison ignores sector/indicator/status filters (it is an explicit pick) but honours county & population group. */
+  function compareSeries(id) {
+    const f = S.f;
+    const parts = S.series.filter(s => s.id === id && s.disagg === f.group && (f.county === 'All' || s.county === f.county));
+    if (!parts.length) return null;
+    const a = { id, short: parts[0].short, unit: parts[0].unit, target: 0, values: new Array(S.N).fill(0) };
+    parts.forEach(s => { a.target += s.target; s.values.forEach((v, i) => { a.values[i] += v; }); });
+    a.cumByMonth = runningTotals(a.values);
+    return a;
+  }
+
+  function renderCompare() {
+    // Picker
+    const picker = $('comparePicker');
+    picker.textContent = '';
+    S.compare.forEach(c => {
+      const ind = S.indicators.find(i => i.id === c.id);
+      if (!ind) return;
+      const chip = document.createElement('span');
+      chip.className = 'compare-chip';
+      const key = document.createElement('span');
+      key.className = 'line-key';
+      key.style.background = cssVar(SERIES_VARS[c.slot]);
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.textContent = '×'; btn.setAttribute('aria-label', 'Remove ' + ind.short);
+      btn.addEventListener('click', () => toggleCompare(c.id));
+      chip.appendChild(key);
+      chip.appendChild(document.createTextNode(ind.short));
+      chip.appendChild(btn);
+      picker.appendChild(chip);
+    });
+    const sel = document.createElement('select');
+    sel.setAttribute('aria-label', 'Add indicator to comparison');
+    sel.appendChild(new Option(S.compare.length >= MAX_COMPARE ? '+ Replace oldest…' : '+ Add indicator…', ''));
+    SECTOR_ORDER.concat(uniq(S.indicators.map(i => i.sector)).filter(s => SECTOR_ORDER.indexOf(s) < 0)).forEach(sec => {
+      const opts = S.indicators.filter(i => i.sector === sec && !S.compare.some(c => c.id === i.id));
+      if (!opts.length) return;
+      const og = document.createElement('optgroup');
+      og.label = sec;
+      opts.forEach(i => og.appendChild(new Option(i.short + (i.unit ? ' (' + i.unit + ')' : ''), i.id)));
+      sel.appendChild(og);
+    });
+    sel.addEventListener('change', () => { if (sel.value) toggleCompare(sel.value); });
+    picker.appendChild(sel);
+
+    // Data
+    const all = S.compare.map(c => ({ c, s: compareSeries(c.id) }));
+    const picked = all.filter(x => x.s);
+    const missing = all.filter(x => !x.s).map(x => (S.indicators.find(i => i.id === x.c.id) || {}).short);
+    picker.querySelectorAll('.compare-chip').forEach((chip, k) => {
+      if (all[k] && !all[k].s) { chip.style.opacity = 0.5; chip.title = 'No data for this county / population group'; }
+    });
+    const units = uniq(picked.map(x => x.s.unit));
+    const mixedUnits = units.length > 1;
+    const modeBtns = document.querySelectorAll('[data-chart="compare"] .seg-toggle button');
+    modeBtns.forEach(b => { b.disabled = mixedUnits && b.dataset.mode !== 'pct'; });
+    let mode = S.compareMode;
+    const note = $('compareNote');
+    if (mixedUnits && mode !== 'pct') mode = 'pct';
+    const notes = [];
+    if (missing.length) {
+      notes.push(missing.join(', ') + (missing.length === 1 ? ' has' : ' have') + ' no data for ' +
+        (S.f.county === 'All' ? 'all counties' : S.f.county) + (S.f.group !== 'Total' ? ' · ' + S.f.group : '') + '.');
+    }
+    if (mixedUnits) {
+      notes.push('These indicators use different units (' + units.join(', ') + '), so they are compared as % of target. Pick indicators with the same unit to compare raw numbers.');
+    }
+    note.hidden = !notes.length;
+    note.textContent = notes.join(' ');
+    modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+
+    const months = range(S.f.from, S.f.to);
+    const valueAt = (s, m) => {
+      if (m > S.latest) return null;
+      if (mode === 'pct') return s.target > 0 ? s.cumByMonth[m - 1] / s.target * 100 : null;
+      if (mode === 'cum') return s.cumByMonth[m - 1];
+      return s.values[m - 1];
+    };
+    const datasets = picked.map(x => lineDataset(x.s.short, months.map(m => valueAt(x.s, m)), cssVar(SERIES_VARS[x.c.slot])));
+    if (mode === 'pct' && picked.length) {
+      datasets.push(lineDataset('Expected pace', months.map(m => m / S.N * 100), cssVar('--expected'), { borderDash: [5, 4], pointRadius: 0, tension: 0 }));
+    }
+    const unit = units[0] || '';
+    $('compareSub').textContent = picked.length
+      ? (mode === 'pct' ? 'Cumulative % of target' : mode === 'cum' ? 'Cumulative ' + unit.toLowerCase() : 'Monthly ' + unit.toLowerCase()) +
+        ' · ' + (S.f.county === 'All' ? 'all counties' : S.f.county) + (S.f.group !== 'Total' ? ' · ' + S.f.group : '')
+      : 'Pick up to 4 indicators — or click a row in the table below';
+
+    makeChart('compare', 'compareChart', {
+      type: 'line',
+      data: { labels: months.map(monthLabel), datasets },
+      options: {
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: axis({ grid: { display: false } }),
+          y: axis({ beginAtZero: true, ticks: { color: cssVar('--text-muted'), callback: v => mode === 'pct' ? v + '%' : Number(v).toLocaleString() } })
+        },
+        plugins: {
+          legend: lineLegend,
+          tooltip: {
+            callbacks: Object.assign({
+              label: c => ' ' + (c.parsed.y == null ? '–' : mode === 'pct' ? c.parsed.y.toFixed(1) + '%' : fmt(c.parsed.y)) + '  ' + c.dataset.label
+            }, lineKey)
+          }
+        }
+      },
+      plugins: [crosshair]
+    });
+
+    S.tables.compare = {
+      head: ['Month'].concat(datasets.map(d => d.label)),
+      rows: months.map((m, i) => [monthLabel(m)].concat(datasets.map(d => d.data[i] == null ? '–' : mode === 'pct' ? d.data[i].toFixed(1) + '%' : fmt(d.data[i]))))
+    };
+    if (S.tableOn.compare) showTable('compare');
+  }
+
+  // ---------- Breakdown (sector / county) ----------
+  function renderBreakdown(view) {
+    const by = S.breakdownBy;
+    $('breakdownTitle').textContent = 'Progress by ' + by.toLowerCase();
+    const groups = new Map();
+    if (by === 'Sector') {
+      view.inds.filter(i => i.target > 0).forEach(i => {
+        if (!groups.has(i.sector)) groups.set(i.sector, []);
+        groups.get(i.sector).push(Math.min(i.pct, 1));
+      });
+    } else {
+      view.base.filter(s => s.target > 0).forEach(s => {
+        const cum = s.values.slice(0, S.f.to).reduce((a, b) => a + b, 0);
+        if (!groups.has(s.county)) groups.set(s.county, []);
+        groups.get(s.county).push(Math.min(cum / s.target, 1));
+      });
+    }
+    let keys = Array.from(groups.keys());
+    keys = by === 'Sector' ? keys.sort((a, b) => sectorRank(a) - sectorRank(b)) : keys.sort();
+    const vals = keys.map(k => { const g = groups.get(k); return g.reduce((a, b) => a + b, 0) / g.length * 100; });
+    const ns = keys.map(k => groups.get(k).length);
+    const expected = S.f.to / S.N * 100;
+
+    makeChart('breakdown', 'breakdownChart', {
+      type: 'bar',
+      data: {
+        labels: keys,
+        datasets: [{ label: 'Avg % of target', data: vals, backgroundColor: cssVar('--s1'), borderRadius: 4, borderSkipped: 'start', maxBarThickness: 24 }]
+      },
+      options: {
+        indexAxis: 'y',
+        layout: { padding: { top: 16 } },
+        scales: {
+          x: axis({ beginAtZero: true, max: 100, ticks: { color: cssVar('--text-muted'), callback: v => v + '%' } }),
+          y: axis({ grid: { display: false } })
+        },
+        plugins: {
+          legend: { display: false },
+          refLine: { value: expected, axis: 'x', label: 'Expected ' + expected.toFixed(0) + '%' },
+          tooltip: { callbacks: { label: c => ' ' + c.parsed.x.toFixed(1) + '%  avg of ' + ns[c.dataIndex] + ' indicator' + (ns[c.dataIndex] === 1 ? '' : 's') } }
+        }
+      },
+      plugins: [refLine, valueLabels(v => v.toFixed(0) + '%')]
+    });
+
+    S.tables.breakdown = {
+      head: [by, 'Avg % of target', 'Indicators', 'Expected %'],
+      rows: keys.map((k, i) => [k, vals[i].toFixed(1) + '%', ns[i], expected.toFixed(1) + '%'])
+    };
+  }
+
+  /** Value at the tip of each horizontal bar (selective direct label). */
+  function valueLabels(format) {
+    return {
+      id: 'valueLabels',
+      afterDatasetsDraw(chart) {
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.fillStyle = cssVar('--text-primary');
+        ctx.font = '600 11px system-ui, -apple-system, "Segoe UI", sans-serif';
+        ctx.textBaseline = 'middle';
+        const ds = chart.data.datasets[0];
+        const warning = cssVar('--st-atrisk').toLowerCase();
+        chart.getDatasetMeta(0).data.forEach((bar, i) => {
+          const v = ds.data[i];
+          if (v == null) return;
+          const text = format(v), w = ctx.measureText(text).width;
+          const inside = bar.x + 6 + w > chart.chartArea.right;
+          const bg = String(Array.isArray(ds.backgroundColor) ? ds.backgroundColor[i] : ds.backgroundColor).toLowerCase();
+          // Inside a fill: white, except near-black on the warning yellow
+          ctx.fillStyle = inside ? (bg === warning ? '#0b0b0b' : '#ffffff') : cssVar('--text-primary');
+          ctx.fillText(text, inside ? bar.x - 6 - w : bar.x + 6, bar.y);
+        });
+        ctx.restore();
+      }
+    };
+  }
+
+  // ---------- Who was reached (sex & age) ----------
+  function renderGroups(view) {
+    const f = S.f;
+    const ids = new Set(view.inds.map(i => i.id));
+    const rows = [];
+    S.indicators.forEach(ind => {
+      if (!ids.has(ind.id)) return;
+      const totals = SUBGROUPS.map(g => S.series
+        .filter(s => s.id === ind.id && s.disagg === g && (f.county === 'All' || s.county === f.county))
+        .reduce((sum, s) => sum + s.values.slice(f.from - 1, f.to).reduce((a, b) => a + b, 0), 0));
+      const total = totals.reduce((a, b) => a + b, 0);
+      if (total > 0) rows.push({ short: ind.short, totals, total });
+    });
+    rows.sort((a, b) => b.total - a.total);
+    const shown = rows.slice(0, 12);
+
+    const container = $('groupsContainer');
+    container.style.height = Math.max(220, shown.length * 34 + 70) + 'px';
+    let empty = container.querySelector('.empty');
+    if (!shown.length) {
+      if (!empty) { empty = document.createElement('div'); empty.className = 'empty'; container.appendChild(empty); }
+      empty.textContent = 'No sex/age-disaggregated data for this selection.';
+      if (S.charts.groups) { S.charts.groups.destroy(); delete S.charts.groups; }
+      $('groupsChart').style.display = 'none';
+      S.tables.groups = { head: ['Indicator'].concat(SUBGROUPS), rows: [] };
+      return;
+    }
+    if (empty) empty.remove();
+    $('groupsChart').style.display = '';
+
+    const surface = cssVar('--surface');
+    makeChart('groups', 'groupsChart', {
+      type: 'bar',
+      data: {
+        labels: shown.map(r => r.short),
+        datasets: SUBGROUPS.map((g, k) => ({
+          label: g, data: shown.map(r => r.totals[k] / r.total * 100), raw: shown.map(r => r.totals[k]),
+          backgroundColor: cssVar(GROUP_VAR[g]), borderColor: surface, borderWidth: { right: 2 }, borderSkipped: 'left',
+          borderRadius: 2, maxBarThickness: 22
+        }))
+      },
+      options: {
+        indexAxis: 'y',
+        interaction: { mode: 'index', intersect: false, axis: 'y' },
+        scales: {
+          x: axis({ stacked: true, max: 100, ticks: { color: cssVar('--text-muted'), callback: v => v + '%' } }),
+          y: axis({ stacked: true, grid: { display: false } })
+        },
+        plugins: {
+          legend: { labels: { pointStyle: 'rect' } },
+          tooltip: { callbacks: { label: c => ' ' + fmt(c.dataset.raw[c.dataIndex]) + ' (' + c.parsed.x.toFixed(0) + '%)  ' + c.dataset.label } }
+        }
+      }
+    });
+
+    S.tables.groups = {
+      head: ['Indicator'].concat(SUBGROUPS).concat(['Total']),
+      rows: rows.map(r => [r.short].concat(r.totals.map((t, k) => fmt(t) + ' (' + (t / r.total * 100).toFixed(0) + '%)')).concat([fmt(r.total)]))
+    };
+  }
+
+  // ---------- Progress by indicator ----------
+  function renderIndicatorChart(view) {
+    const items = view.inds.filter(i => i.target > 0).sort((a, b) => b.pct - a.pct);
+    const container = $('indicatorContainer');
+    container.style.height = Math.max(220, items.length * 28 + 90) + 'px';
+    const expected = S.f.to / S.N * 100;
+    const maxPct = Math.max(100, ...items.map(i => i.pct * 100));
+    const present = STATUSES.filter(s => items.some(i => i.status === s));
+
+    makeChart('indicators', 'indicatorChart', {
+      type: 'bar',
+      data: {
+        labels: items.map(i => i.short),
+        datasets: [{
+          label: '% of target', data: items.map(i => i.pct * 100),
+          backgroundColor: items.map(i => cssVar(STATUS_VAR[i.status])),
+          borderRadius: 4, borderSkipped: 'start', maxBarThickness: 18
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        layout: { padding: { top: 16, right: 8 } },
+        scales: {
+          x: axis({ beginAtZero: true, max: Math.ceil(maxPct / 10) * 10, ticks: { color: cssVar('--text-muted'), callback: v => v + '%' } }),
+          y: axis({ grid: { display: false }, ticks: { color: cssVar('--text-secondary'), autoSkip: false } })
+        },
+        plugins: {
+          legend: {
+            labels: {
+              pointStyle: 'rect',
+              generateLabels: () => present.map(s => ({
+                text: s, fillStyle: cssVar(STATUS_VAR[s]), strokeStyle: cssVar(STATUS_VAR[s]), lineWidth: 0,
+                fontColor: cssVar('--text-secondary'), pointStyle: 'rect', hidden: false
+              }))
+            },
+            onClick: () => {}
+          },
+          refLine: { value: expected, axis: 'x', label: 'Expected ' + expected.toFixed(0) + '%' },
+          tooltip: {
+            callbacks: {
+              title: c => items[c[0].dataIndex].name || items[c[0].dataIndex].short,
+              label: c => {
+                const i = items[c.dataIndex];
+                return [' ' + fmtPct(i.pct) + '  ' + i.status, ' ' + fmt(i.cum) + ' of ' + fmt(i.target) + ' ' + i.unit];
+              }
+            }
+          }
+        },
+        onClick: (e, els) => { if (els.length) toggleCompare(items[els[0].index].id); }
+      },
+      plugins: [refLine, valueLabels(v => v.toFixed(0) + '%')]
+    });
+
+    S.tables.indicators = {
+      head: ['Indicator', 'Sector', '% of target', 'Status'],
+      rows: items.map(i => [i.short, i.sector, fmtPct(i.pct), i.status])
+    };
+  }
+
+  // ---------- Matrix table ----------
+  function renderTable(view) {
+    const q = S.search.trim().toLowerCase();
+    let rows = view.inds.filter(i => !q || (i.short + ' ' + i.name + ' ' + i.sector + ' ' + i.unit).toLowerCase().indexOf(q) >= 0);
+    const k = S.sort.key, dir = S.sort.dir;
+    const val = i => k === 'pct' ? (i.pct == null ? -1 : i.pct) : k === 'status' ? STATUSES.indexOf(i.status) : i[k === 'counties' ? 'countiesLabel' : k];
+    rows.sort((a, b) => {
+      const x = val(a), y = val(b);
+      return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * dir;
+    });
+    S.tableRows = rows;
+
+    document.querySelectorAll('#matrix th[data-sort]').forEach(th => {
+      th.classList.toggle('sorted-asc', th.dataset.sort === k && dir === 1);
+      th.classList.toggle('sorted-desc', th.dataset.sort === k && dir === -1);
+    });
+
+    const tbody = $('tableBody');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="10" class="empty">No indicators match this selection.</td></tr>';
+      return;
+    }
+    const expected = S.f.to / S.N;
+    tbody.innerHTML = rows.map(i => {
+      const color = cssVar(STATUS_VAR[i.status]);
+      const pctW = i.pct == null ? 0 : Math.min(i.pct, 1) * 100;
+      return '<tr data-id="' + esc(i.id) + '" tabindex="0">' +
+        '<td><div class="ind-name">' + esc(i.short) + '</div><div class="ind-full">' + esc(i.name) + '</div></td>' +
+        '<td>' + esc(i.sector) + '</td>' +
+        '<td>' + esc(i.countiesLabel) + '</td>' +
+        '<td>' + esc(i.unit) + '</td>' +
+        '<td class="num">' + (i.target > 0 ? fmt(i.target) : '–') + '</td>' +
+        '<td class="num">' + fmt(i.period) + '</td>' +
+        '<td class="num">' + fmt(i.cum) + '</td>' +
+        '<td><div class="progress-wrapper"><div class="progress-bar">' +
+          '<div class="progress-fill" style="width:' + pctW + '%;background:' + color + '"></div>' +
+          '<div class="progress-expected" style="left:calc(' + Math.min(expected, 1) * 100 + '% - 1px)" title="Expected ' + fmtPct(expected, 0) + '"></div>' +
+        '</div><div class="progress-text">' + fmtPct(i.pct) + '</div></div></td>' +
+        '<td>' + sparkline(i.values.slice(S.f.from - 1, Math.min(S.f.to, S.latest))) + '</td>' +
+        '<td><span class="status-badge"><span class="status-dot" style="background:' + color + '"></span>' + esc(i.status) + '</span></td>' +
+        '</tr>';
+    }).join('');
+    markCompareRows();
+  }
+
+  function markCompareRows() {
+    const ids = new Set(S.compare.map(c => c.id));
+    document.querySelectorAll('#tableBody tr[data-id]').forEach(tr => tr.classList.toggle('in-compare', ids.has(tr.dataset.id)));
+  }
+
+  function sparkline(vals) {
+    if (!vals.length) return '';
+    const w = 90, h = 24, max = Math.max.apply(null, vals) || 1;
+    const step = vals.length > 1 ? w / (vals.length - 1) : 0;
+    const pts = vals.map((v, i) => (i * step).toFixed(1) + ',' + (h - 3 - (v / max) * (h - 6)).toFixed(1));
+    const last = pts[pts.length - 1].split(',');
+    return '<svg class="spark" width="' + w + '" height="' + h + '" aria-hidden="true">' +
+      '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + cssVar('--text-muted') + '" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>' +
+      '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="2.5" fill="' + cssVar('--s1') + '"/></svg>';
+  }
+
+  function exportCsv() {
+    const head = ['Indicator_ID', 'Short_Name', 'Indicator_Name', 'Sector', 'Counties', 'Unit', 'Target', 'In_Period', 'Achieved_To_Date', 'Pct_Achieved', 'Expected_Pct', 'Status'];
+    const lines = [head].concat((S.tableRows || []).map(i => [
+      i.id, i.short, i.name, i.sector, i.countiesLabel, i.unit, i.target, i.period, i.cum,
+      i.pct == null ? '' : (i.pct * 100).toFixed(1), (i.expected * 100).toFixed(1), i.status
+    ]));
+    const csv = lines.map(r => r.map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = 'cido-indicators_' + monthLabel(S.f.from) + '_to_' + monthLabel(S.f.to) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // ---------- Chart table twins ----------
+  function showTable(key) {
+    const card = document.querySelector('[data-chart="' + key + '"]');
+    const t = S.tables[key];
+    if (!card || !t) return;
+    const box = card.querySelector('.chart-table');
+    box.innerHTML = '<table><thead><tr>' + t.head.map((h, i) => '<th' + (i ? ' class="num"' : '') + '>' + esc(h) + '</th>').join('') +
+      '</tr></thead><tbody>' + (t.rows.length ? t.rows.map(r => '<tr>' + r.map((c, i) => '<td' + (i ? ' class="num"' : '') + '>' + esc(c) + '</td>').join('') + '</tr>').join('')
+        : '<tr><td colspan="' + t.head.length + '" class="empty">No data for this selection.</td></tr>') + '</tbody></table>';
+  }
+
+  function toggleTable(key, btn) {
+    const card = document.querySelector('[data-chart="' + key + '"]');
+    S.tableOn[key] = !S.tableOn[key];
+    card.querySelector('.chart-container').hidden = S.tableOn[key];
+    card.querySelector('.chart-table').hidden = !S.tableOn[key];
+    btn.textContent = S.tableOn[key] ? 'Chart' : 'Table';
+    if (S.tableOn[key]) showTable(key);
+  }
+
+  // ---------- Tooltip for HTML marks ----------
+  function showTip(e, rows) {
+    const tip = $('tooltip');
+    tip.textContent = '';
+    rows.forEach(([label, value]) => {
+      const d = document.createElement('div');
+      const b = document.createElement('strong');
+      b.textContent = value;
+      d.appendChild(b);
+      d.appendChild(document.createTextNode('  ' + label));
+      tip.appendChild(d);
+    });
+    tip.hidden = false;
+    tip.style.left = Math.min(e.clientX + 12, window.innerWidth - tip.offsetWidth - 8) + 'px';
+    tip.style.top = (e.clientY + 14) + 'px';
+  }
+  function hideTip() { $('tooltip').hidden = true; }
+
+  // ---------- Filters UI ----------
+  const multis = {};
+
+  function buildFilterControls() {
+    const county = $('filterCounty');
+    S.counties.forEach(c => county.appendChild(new Option(c, c)));
+    const group = $('filterGroup');
+    S.groups.slice(1).forEach(g => group.appendChild(new Option(g, g)));
+    fillMonthSelects();
+    syncPresetAvailability();
+
+    multis.sector = MultiSelect($('multiSector'), {
+      allLabel: 'All sectors', selected: () => S.f.sectors,
+      options: () => uniq(S.indicators.map(i => i.sector)).sort((a, b) => sectorRank(a) - sectorRank(b)).map(s => ({ value: s, label: s })),
+      onChange: () => {
+        // Drop indicators that fall outside the chosen sectors
+        if (S.f.sectors.size) S.f.indicators.forEach(id => {
+          const ind = S.indicators.find(i => i.id === id);
+          if (ind && !S.f.sectors.has(ind.sector)) S.f.indicators.delete(id);
+        });
+        multis.indicator.refresh();
+        render();
+      }
+    });
+    multis.indicator = MultiSelect($('multiIndicator'), {
+      allLabel: 'All indicators', searchable: true, selected: () => S.f.indicators,
+      options: () => S.indicators.filter(i => !S.f.sectors.size || S.f.sectors.has(i.sector))
+        .map(i => ({ value: i.id, label: i.short, meta: i.sector + (i.unit ? ' · ' + i.unit : '') })),
+      onChange: render
+    });
+    multis.status = MultiSelect($('multiStatus'), {
+      allLabel: 'All statuses', selected: () => S.f.statuses,
+      options: () => STATUSES.map(s => ({ value: s, label: s, color: cssVar(STATUS_VAR[s]) })),
+      onChange: render
+    });
+  }
+
+  function fillMonthSelects() {
+    ['filterFrom', 'filterTo'].forEach(id => {
+      const sel = $(id);
+      sel.textContent = '';
+      range(1, S.latest).forEach(m => sel.appendChild(new Option(monthLabel(m) + ' (M' + m + ')', m)));
+    });
+    syncFilterInputs();
+  }
+
+  function syncPresetAvailability() {
+    const opts = $('filterPreset').options;
+    for (let i = 0; i < opts.length; i++) {
+      const o = opts[i];
+      if (o.value === 'y2') o.disabled = S.latest < 13;
+      if (o.value === 'last12') o.disabled = S.latest < 12;
+    }
+  }
+
+  function syncFilterInputs() {
+    $('filterPreset').value = S.f.preset;
+    $('filterFrom').value = S.f.from;
+    $('filterTo').value = S.f.to;
+    $('filterCounty').value = S.f.county;
+    $('filterGroup').value = S.f.group;
+    Object.keys(multis).forEach(k => multis[k].refresh());
+  }
+
+  function applyPreset(p) {
+    const L = S.latest;
+    const map = {
+      todate: [1, L], last3: [Math.max(1, L - 2), L], last6: [Math.max(1, L - 5), L],
+      last12: [Math.max(1, L - 11), L], y1: [1, Math.min(12, L)], y2: [13, L]
+    };
+    if (map[p]) { S.f.from = map[p][0]; S.f.to = map[p][1]; }
+    S.f.preset = p;
+  }
+
+  function wireUi() {
+    $('filterPreset').addEventListener('change', e => { applyPreset(e.target.value); syncFilterInputs(); render(); });
+    $('filterFrom').addEventListener('change', e => {
+      S.f.from = Number(e.target.value); if (S.f.from > S.f.to) S.f.to = S.f.from;
+      S.f.preset = 'custom'; syncFilterInputs(); render();
+    });
+    $('filterTo').addEventListener('change', e => {
+      S.f.to = Number(e.target.value); if (S.f.to < S.f.from) S.f.from = S.f.to;
+      S.f.preset = 'custom'; syncFilterInputs(); render();
+    });
+    $('filterCounty').addEventListener('change', e => { S.f.county = e.target.value; render(); });
+    $('filterGroup').addEventListener('change', e => { S.f.group = e.target.value; render(); });
+    $('resetFilters').addEventListener('click', () => { S.f = defaultFilters(); S.search = ''; $('tableSearch').value = ''; syncFilterInputs(); render(); });
+
+    document.querySelectorAll('[data-chart="compare"] .seg-toggle button').forEach(b =>
+      b.addEventListener('click', () => { S.compareMode = b.dataset.mode; renderCompare(); }));
+    document.querySelectorAll('[data-chart="breakdown"] .seg-toggle button').forEach(b =>
+      b.addEventListener('click', () => {
+        S.breakdownBy = b.dataset.by;
+        document.querySelectorAll('[data-chart="breakdown"] .seg-toggle button').forEach(x => x.classList.toggle('active', x === b));
+        renderBreakdown(buildView());
+        if (S.tableOn.breakdown) showTable('breakdown');
+      }));
+    document.querySelectorAll('.table-toggle').forEach(btn =>
+      btn.addEventListener('click', () => toggleTable(btn.closest('[data-chart]').dataset.chart, btn)));
+
+    document.querySelectorAll('#matrix th[data-sort]').forEach(th => th.addEventListener('click', () => {
+      const k = th.dataset.sort;
+      S.sort = { key: k, dir: S.sort.key === k ? -S.sort.dir : (['short', 'sector', 'counties', 'unit'].indexOf(k) >= 0 ? 1 : -1) };
+      renderTable(buildView());
+    }));
+    $('tableBody').addEventListener('click', e => {
+      const tr = e.target.closest('tr[data-id]');
+      if (tr) toggleCompare(tr.dataset.id);
+    });
+    $('tableBody').addEventListener('keydown', e => {
+      const tr = e.target.closest('tr[data-id]');
+      if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleCompare(tr.dataset.id); }
+    });
+    let searchTimer;
+    $('tableSearch').addEventListener('input', e => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { S.search = e.target.value; renderTable(buildView()); }, 150);
+    });
+    $('exportCsv').addEventListener('click', exportCsv);
+    document.addEventListener('click', e => { Object.keys(multis).forEach(k => multis[k].closeIfOutside(e)); });
+  }
+
+  /** Small multi-select dropdown with checkboxes. Empty selection = all. */
+  function MultiSelect(host, cfg) {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'multi-btn';
+    btn.setAttribute('aria-haspopup', 'listbox'); btn.setAttribute('aria-expanded', 'false');
+    const panel = document.createElement('div');
+    panel.className = 'multi-panel'; panel.hidden = true;
+    let search = null;
+    if (cfg.searchable) {
+      search = document.createElement('input');
+      search.type = 'search'; search.placeholder = 'Search…';
+      search.addEventListener('input', drawOptions);
+      panel.appendChild(search);
+    }
+    const list = document.createElement('div');
+    list.className = 'multi-options';
+    panel.appendChild(list);
+    const foot = document.createElement('div');
+    foot.className = 'multi-foot';
+    const clear = document.createElement('button');
+    clear.type = 'button'; clear.className = 'link-btn'; clear.textContent = 'Clear (show all)';
+    clear.addEventListener('click', () => { cfg.selected().clear(); drawOptions(); label(); cfg.onChange(); });
+    const done = document.createElement('button');
+    done.type = 'button'; done.className = 'link-btn'; done.textContent = 'Done';
+    done.addEventListener('click', () => close());
+    foot.appendChild(clear); foot.appendChild(done);
+    panel.appendChild(foot);
+    host.appendChild(btn); host.appendChild(panel);
+
+    btn.addEventListener('click', () => { panel.hidden ? open() : close(); });
+    function open() {
+      Object.keys(multis).forEach(k => { if (multis[k].host !== host) multis[k].close(); });
+      panel.hidden = false; btn.setAttribute('aria-expanded', 'true'); drawOptions();
+      if (search) search.focus();
+    }
+    function close() { panel.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+
+    function drawOptions() {
+      const sel = cfg.selected();
+      const q = search ? search.value.trim().toLowerCase() : '';
+      list.textContent = '';
+      cfg.options().filter(o => !q || (o.label + ' ' + (o.meta || '')).toLowerCase().indexOf(q) >= 0).forEach(o => {
+        const row = document.createElement('label');
+        row.className = 'multi-option';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.checked = sel.has(o.value);
+        cb.addEventListener('change', () => { cb.checked ? sel.add(o.value) : sel.delete(o.value); label(); cfg.onChange(); });
+        row.appendChild(cb);
+        const txt = document.createElement('span');
+        if (o.color) {
+          const dot = document.createElement('span');
+          dot.className = 'status-dot'; dot.style.background = o.color; dot.style.marginRight = '6px';
+          txt.appendChild(dot);
+        }
+        txt.appendChild(document.createTextNode(o.label));
+        if (o.meta) {
+          const m = document.createElement('div');
+          m.className = 'opt-meta'; m.textContent = o.meta;
+          txt.appendChild(m);
+        }
+        row.appendChild(txt);
+        list.appendChild(row);
+      });
+    }
+    function label() {
+      const sel = cfg.selected();
+      const opts = cfg.options();
+      if (!sel.size) btn.textContent = cfg.allLabel;
+      else if (sel.size === 1) { const o = opts.find(x => sel.has(x.value)); btn.textContent = o ? o.label : '1 selected'; }
+      else btn.textContent = sel.size + ' selected';
+    }
+    label();
+    return {
+      host, close,
+      refresh() { label(); if (!panel.hidden) drawOptions(); },
+      closeIfOutside(e) { if (!host.contains(e.target)) close(); }
+    };
+  }
+
+  // Active-filter chips (each removable)
+  function renderChips() {
+    const box = $('activeFilters');
+    box.textContent = '';
+    const f = S.f, chips = [];
+    if (!(f.from === 1 && f.to === S.latest)) chips.push(['Period: ' + monthLabel(f.from) + ' – ' + monthLabel(f.to), () => { f.from = 1; f.to = S.latest; f.preset = 'todate'; }]);
+    if (f.county !== 'All') chips.push(['County: ' + f.county, () => { f.county = 'All'; }]);
+    if (f.group !== 'Total') chips.push(['Group: ' + f.group, () => { f.group = 'Total'; }]);
+    f.sectors.forEach(s => chips.push(['Sector: ' + s, () => { f.sectors.delete(s); }]));
+    f.indicators.forEach(id => {
+      const ind = S.indicators.find(i => i.id === id);
+      chips.push(['Indicator: ' + (ind ? ind.short : id), () => { f.indicators.delete(id); }]);
+    });
+    f.statuses.forEach(s => chips.push(['Status: ' + s, () => { f.statuses.delete(s); }]));
+    chips.forEach(([text, clear]) => {
+      const c = document.createElement('span');
+      c.className = 'chip';
+      c.appendChild(document.createTextNode(text));
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = '×'; b.setAttribute('aria-label', 'Remove filter ' + text);
+      b.addEventListener('click', () => { clear(); syncFilterInputs(); render(); });
+      c.appendChild(b);
+      box.appendChild(c);
+    });
+  }
+
+  // ---------- Theme ----------
+  function initTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem('cido-theme'); } catch (e) { /* storage blocked in some iframes */ }
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+    applyChartTheme();
+    $('themeToggle').addEventListener('click', () => {
+      const isDark = cssVar('--surface').toLowerCase() === '#1a1a19';
+      const next = isDark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('cido-theme', next); } catch (e) { /* ignore */ }
+      applyChartTheme();
+      if (S.f) render();
+    });
+  }
+
+  function hexA(hex, a) {
+    const h = hex.replace('#', '');
+    const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+})();
+</script>
