@@ -80,19 +80,22 @@
   :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
   /* ---------- Header ---------- */
+  /* CIDO logo | title (centred between the logos) | SV logo | data pill + theme */
   .header {
     background: linear-gradient(120deg, var(--brand-strong), var(--brand));
-    color: #fff; padding: 16px 28px;
-    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    color: #fff; padding: 14px 28px;
+    display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 20px;
   }
-  .brand { display: flex; align-items: center; gap: 16px; }
-  .logo {
-    background: #fff; color: var(--brand); font-weight: 800; font-size: 18px; letter-spacing: 0.5px;
-    padding: 8px 12px; border-radius: 10px; border-bottom: 3px solid var(--brand-orange);
+  /* Both logos sit on identical plates at the same height */
+  .logo-plate {
+    background: #fff; border-radius: 10px; width: 150px; height: 60px; padding: 8px 12px;
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   }
-  .header-text h1 { font-size: 19px; font-weight: 700; }
+  .logo-plate img { display: block; height: 44px; width: auto; max-width: 100%; object-fit: contain; }
+  .header-text { text-align: center; min-width: 0; }
+  .header-text h1 { font-size: 20px; font-weight: 700; }
   .header-text p { font-size: 13px; opacity: 0.88; }
-  .header-meta { display: flex; align-items: center; gap: 10px; }
+  .header-meta { display: flex; align-items: center; gap: 10px; justify-self: end; }
   .pill { background: rgba(255,255,255,0.16); padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
   .icon-btn {
     background: rgba(255,255,255,0.16); border: 0; color: #fff; width: 34px; height: 34px;
@@ -249,7 +252,12 @@
     .charts-row { grid-template-columns: 1fr; }
     .filters { position: static; padding: 12px 16px; }
     .container, .active-filters { padding-left: 16px; padding-right: 16px; }
-    .header { padding: 14px 16px; }
+    /* Logos side by side on top, title below, then the pill */
+    .header { padding: 14px 16px; grid-template-columns: 1fr 1fr; justify-items: center; gap: 12px; }
+    .logo-cido { grid-column: 1; grid-row: 1; justify-self: end; }
+    .logo-sv { grid-column: 2; grid-row: 1; justify-self: start; }
+    .header-text { grid-column: 1 / -1; grid-row: 2; }
+    .header-meta { grid-column: 1 / -1; grid-row: 3; flex-wrap: wrap; justify-content: center; }
   }
   @media (max-width: 560px) {
     .kpi-grid { grid-template-columns: 1fr; }
