@@ -59,12 +59,13 @@
     th { text-align: left; padding: 12px; background: #f9fafb; color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 11px; border-bottom: 2px solid #e5e7eb; }
     td { padding: 12px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
     tr:hover { background: #f9fafb; }
-    
+
     .status-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; white-space: nowrap; }
     .status-on-track { background: #d1fae5; color: #065f46; }
     .status-at-risk { background: #fef3c7; color: #78350f; }
     .status-lagging { background: #fee2e2; color: #991b1b; }
     .status-completed { background: #dbeafe; color: #1e40af; }
+    .status-not-started { background: #f3f4f6; color: #4b5563; }
 
     .progress-wrapper { display: flex; align-items: center; gap: 10px; min-width: 140px; }
     .progress-bar { flex: 1; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; }
@@ -89,7 +90,7 @@
 
   <!-- Header -->
   <div class="header">
-    <!-- Replace 'YOUR_LOGO_URL_HERE' with a direct link to your CIDO logo if you want it to show. 
+    <!-- Replace 'YOUR_LOGO_URL_HERE' with a direct link to your CIDO logo if you want it to show.
          For now, it will show a placeholder text. -->
     <div style="background: white; padding: 8px 12px; border-radius: 8px; color: var(--cido-green); font-weight: 800; font-size: 20px;">CIDO</div>
     <div class="header-text">
@@ -99,7 +100,7 @@
   </div>
 
   <div class="container">
-    
+
     <!-- Filters -->
     <div class="filters">
       <div class="filter-group">
@@ -224,12 +225,23 @@
         monthSelect.appendChild(option);
       });
 
-      // Set default month to the LATEST available month
-      if (allMonths.length > 0) {
-        monthSelect.value = allMonths[allMonths.length - 1][0];
-      }
+    // Set default month to the LATEST available month
+            // Set default month to the LATEST month that has actual data
+      let latestDataMonth = allMonths[0][0]; // Default to first month
 
-      // Hide loading, render dashboard
+    // Loop through raw data to find the highest month number with a value > 0
+      rawData.forEach(row => {
+        if (row['Disagg'] === 'Total' && Number(row['Cumulative_Achieved']) > 0) {
+          if (row['Month_Number'] > latestDataMonth) {
+            latestDataMonth = row['Month_Number'];
+          }
+        }
+      });
+
+    // If we found a month with data, set it. Otherwise, keep it at the current month.
+      monthSelect.value = latestDataMonth;
+
+    // Hide loading, render dashboard
       document.getElementById('loading').style.display = 'none';
       applyFilters();
     }
@@ -242,7 +254,7 @@
 
       // We only want "Total" disagg rows for the main dashboard to avoid double-counting
       let filtered = rawData.filter(row => row['Disagg'] === 'Total');
-      
+
       // Apply Month Filter
       filtered = filtered.filter(row => row['Month_Number'] === monthFilter);
 
@@ -277,21 +289,22 @@
       // --- Update Table ---
       const tbody = document.getElementById('tableBody');
       tbody.innerHTML = '';
-      
+
       if (filtered.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: #6b7280; padding: 20px;">No data available for this selection.</td></tr>';
       } else {
         filtered.sort((a, b) => b['%_Achieved'] - a['%_Achieved']); // Sort highest progress first
-        
+
         filtered.forEach(row => {
           const pct = (row['%_Achieved'] * 100).toFixed(1);
-          const statusClass = row['Status_RAG'] === 'On Track' ? 'status-on-track' : 
-                              row['Status_RAG'] === 'At Risk' ? 'status-at-risk' : 
-                              row['Status_RAG'] === 'Lagging' ? 'status-lagging' : 'status-completed';
+          const statusClass = row['Status_RAG'] === 'On Track' ? 'status-on-track' :
+                              row['Status_RAG'] === 'At Risk' ? 'status-at-risk' :
+                              row['Status_RAG'] === 'Lagging' ? 'status-lagging' :
+                              row['Status_RAG'] === 'Not Started' ? 'status-not-started' : 'status-completed';
           const statusLabel = row['Status_RAG'] || 'Not Started';
-          
-          let barColor = row['Status_RAG'] === 'On Track' ? 'var(--cido-green)' : 
-                         row['Status_RAG'] === 'At Risk' ? 'var(--cido-orange)' : 
+
+          let barColor = row['Status_RAG'] === 'On Track' ? 'var(--cido-green)' :
+                         row['Status_RAG'] === 'At Risk' ? 'var(--cido-orange)' :
                          row['Status_RAG'] === 'Lagging' ? 'var(--red)' : '#9ca3af';
 
           const tr = document.createElement('tr');
@@ -351,7 +364,7 @@
       // 2. Indicator Chart (Horizontal Bar)
       // Sort by highest target, take top 10 for readability
       const sortedData = [...filteredData].sort((a, b) => b['Target'] - a['Target']).slice(0, 10);
-      
+
       const ctx2 = document.getElementById('indicatorChart').getContext('2d');
       if (indicatorChartInstance) indicatorChartInstance.destroy();
 

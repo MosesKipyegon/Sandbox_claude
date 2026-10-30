@@ -54,6 +54,7 @@ function buildDashboardFeed() {
     const fullName = m[1] || '';
     const sector   = m[3] || '';
     let target = 0;
+    const assignedCounty = m[4] || 'Both'; // Read the assigned County from Activities_Master
     if (m) {
       if (disagg === 'Total')  target = m[6];
       if (disagg === 'Male')   target = m[7];
@@ -63,7 +64,9 @@ function buildDashboardFeed() {
       if (target === '') target = 0;
     }
 
-    counties.forEach(county => {
+    const countiesToRun = assignedCounty === 'Both' ? ['Akobo', 'Nyirol'] : [assignedCounty];
+
+    countiesToRun.forEach(county => {
       let running = 0;
 
       for (let i = 0; i < monthsPerIndicator; i++) {
@@ -87,10 +90,23 @@ function buildDashboardFeed() {
           expectedPct = monthNum / 24;
 
           if (pctAchieved !== '') {
-            if (pctAchieved >= 1)                       statusRAG = 'Completed';
-            else if (pctAchieved >= 0.9 * expectedPct)  statusRAG = 'On Track';
-            else if (pctAchieved >= 0.6 * expectedPct)  statusRAG = 'At Risk';
-            else                                        statusRAG = 'Lagging';
+            // 1. Calculate what the target SHOULD be at this month
+            const expectedTarget = target * expectedPct;
+
+            // 2. Compare actual cumulative to the expected target
+            if (pctAchieved >= 1) {
+              statusRAG = 'Completed';
+            } else if (expectedTarget === 0) {
+              statusRAG = 'On Track'; // Month 1
+            } else if (cumulative >= expectedTarget * 0.9) {
+              statusRAG = 'On Track';
+            } else if (cumulative >= expectedTarget * 0.6) {
+              statusRAG = 'At Risk';
+            } else if (cumulative > 0) {
+              statusRAG = 'Lagging';
+            } else {
+              statusRAG = 'Not Started'; // No data entered yet
+            }
           }
         }
 
@@ -146,17 +162,17 @@ function getDashboardData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('Dashboard_Feed');
   const lastRow = sheet.getLastRow();
-  
+
   // Get all data (15 columns, skipping the header)
   const data = sheet.getRange(2, 1, lastRow - 1, 15).getValues();
-  
+
   // Convert to an array of objects for the HTML
   const headers = [
-    'Indicator_ID', 'Indicator_Name', 'Short_Name', 'Sector', 'County', 
-    'Disagg', 'Unit', 'Month_Number', 'Month_Label', 'Value', 
+    'Indicator_ID', 'Indicator_Name', 'Short_Name', 'Sector', 'County',
+    'Disagg', 'Unit', 'Month_Number', 'Month_Label', 'Value',
     'Target', 'Cumulative_Achieved', '%_Achieved', 'Expected_%', 'Status_RAG'
   ];
-  
+
   return data.map(row => {
     let obj = {};
     headers.forEach((header, index) => {
