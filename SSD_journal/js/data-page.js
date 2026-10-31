@@ -5,6 +5,8 @@ import {
   createBackup, markBackedUp, readBackup, restoreBackup, createCsv,
   downloadBlob, canShareFile, shareBlob, lastBackupAt
 } from './backup.js';
+import { renderSyncPanel } from './sync-ui.js';
+import { scheduleSync } from './sync.js';
 
 export async function renderDataPage(app) {
   const entries = (await getAll('entries')).filter(e => !e.sample);
@@ -14,7 +16,9 @@ export async function renderDataPage(app) {
   app.append(h('header', { class: 'page-head' },
     h('a', { class: 'back', href: '#/' }, '← Journal'),
     h('h1', {}, 'Backup & data'),
-    h('p', { class: 'hint' }, 'Everything is stored only on this device. Keep a backup somewhere safe.')));
+    h('p', { class: 'hint' }, 'Your journal is stored on this device (and in your Google Drive if you turn on sync). Keep a backup somewhere safe too.')));
+
+  app.append(await renderSyncPanel());
 
   // ---------- Back up ----------
   const backupStatus = h('p', { class: 'hint', role: 'status' });
@@ -103,6 +107,7 @@ function showRestoreChoice(box, backup, fileName) {
         ? `Done — the journal now matches the backup (${s.entries} entries, ${s.photos} photos).`
         : `Done — ${n(r.entries.added, 'entry', 'entries')} added, ${r.entries.updated} updated, ${r.entries.kept} already up to date; ${n(r.photos.added, 'photo', 'photos')} added.`;
       if (changed || mode === 'replace') status.append(' ', h('a', { href: '#/' }, 'Open the journal'));
+      scheduleSync(500);
     } catch (e) {
       status.textContent = 'Restore failed: ' + (e.message || e);
     }

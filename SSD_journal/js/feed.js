@@ -4,6 +4,7 @@ import { h, formatDates } from './dom.js';
 import { get } from './db.js';
 import { blobUrl } from './photos.js';
 import { openViewer } from './viewer.js';
+import { fetchFullPhoto } from './sync.js';
 
 let observer = null;
 
@@ -24,6 +25,8 @@ async function loadPhoto(img) {
   if (p && !p.deleted && (p.full || p.thumb)) {
     img.src = blobUrl(p.full || p.thumb);
     img.addEventListener('load', () => img.classList.add('loaded'), { once: true });
+    // Synced from another device: show the thumbnail now, swap in the full photo from Drive
+    if (!p.full) fetchFullPhoto(p.id).then(full => { if (full && img.isConnected) img.src = blobUrl(full); });
   } else {
     img.closest('.card-photo').classList.add('missing');
   }

@@ -150,7 +150,14 @@ export async function deleteEntry(id) {
   });
 }
 
-// ---------- Merge (restore now, Drive sync later) ----------
+/** Stores downloaded image data for a photo. Not an edit: updatedAt is unchanged, so it doesn't sync back. */
+export async function putPhotoBlobs(id, blobs) {
+  const p = await get('photos', id);
+  if (!p || p.deleted) return;
+  await inTx(['photos'], 'readwrite', tx => { tx.objectStore('photos').put({ ...p, ...blobs }); });
+}
+
+// ---------- Merge (restore and Drive sync) ----------
 const STORES = ['places', 'entries', 'photos'];
 
 /**
@@ -159,7 +166,7 @@ const STORES = ['places', 'entries', 'photos'];
  * replace: wipe places/entries/photos first (meta such as deviceId is kept).
  * Returns { places: {added, updated, kept}, entries: {...}, photos: {...} }.
  */
-export async function mergeRecords(incoming, { replace = false } = {}) {
+export async function mergeRecords(incoming, { replace = false, keepBlobs = false } = {}) {
   const result = {};
   const existing = {};
   for (const s of STORES) {
@@ -174,7 +181,12 @@ export async function mergeRecords(incoming, { replace = false } = {}) {
         if (!rec || typeof rec.id !== 'string') continue;
         const old = existing[s].get(rec.id);
         if (!old) { store.put(rec); result[s].added++; }
-        else if ((rec.updatedAt || 0) > (old.updatedAt || 0)) { store.put(rec); result[s].updated++; }
+        else if ((rec.updatedAt || 0) > (old.updatedAt || 0)) {
+          // Sync sends photo details without the images: keep the images already on this device
+          const merged = keepBlobs && s === 'photos' && !rec.deleted ? { ...rec, full: rec.full || old.full, thumb: rec.thumb || old.thumb } : rec;
+          store.put(merged);
+          result[s].updated++;
+        }
         else result[s].kept++;
       }
     }

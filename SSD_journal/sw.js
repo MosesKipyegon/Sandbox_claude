@@ -3,7 +3,7 @@
 //  - Map tiles you have viewed are kept (up to MAX_TILES) so the map works offline where you've looked before.
 // VERSION changes whenever a shell file changes (run: node tools/stamp-sw.js), which makes the browser
 // fetch the new files and show the "new version" notice.
-const VERSION = 'ea08a05b47';
+const VERSION = '83deb8c112';
 const SHELL_CACHE = 'ssd-shell-' + VERSION;
 const TILE_CACHE = 'ssd-tiles-v1';
 const MAX_TILES = 2000;                      // ≈ 40 MB
@@ -17,9 +17,11 @@ const SHELL = [
   'css/app.css',
   'js/app.js',
   'js/backup.js',
+  'js/config.js',
   'js/data-page.js',
   'js/db.js',
   'js/dom.js',
+  'js/drive.js',
   'js/feed.js',
   'js/form.js',
   'js/map.js',
@@ -27,6 +29,8 @@ const SHELL = [
   'js/pwa.js',
   'js/samples.js',
   'js/seed-places.js',
+  'js/sync.js',
+  'js/sync-ui.js',
   'js/viewer.js',
   'data/south-sudan.geojson',
   'vendor/leaflet/leaflet.css',

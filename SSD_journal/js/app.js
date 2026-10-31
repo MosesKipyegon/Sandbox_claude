@@ -8,6 +8,8 @@ import { createHomeMap, removeAllMaps } from './map.js';
 import { initPwa } from './pwa.js';
 import { renderDataPage, ago } from './data-page.js';
 import { lastBackupAt } from './backup.js';
+import { initSync, scheduleSync } from './sync.js';
+import { initSyncButton } from './sync-ui.js';
 import { addSamplesIfNew, removeSamples } from './samples.js';
 import { h } from './dom.js';
 import { revokeAll } from './photos.js';
@@ -28,6 +30,10 @@ async function start() {
   }
   window.addEventListener('hashchange', route);
   route();
+  initSyncButton();
+  initSync();
+  // New data from the other device: refresh the screen — but never while a form is open
+  window.addEventListener('ssd:synced', () => { if (!['new', 'edit', 'data'].includes(document.body.dataset.view)) route(); });
 }
 
 async function route() {
@@ -44,7 +50,7 @@ async function route() {
     await renderForm(app, {
       entry, places, presetPlaceId: view === 'new' ? id : null,
       // Back to where the user came from: the place page if they started there, else the feed
-      onDone: () => { location.hash = returnTo; }
+      onDone: () => { scheduleSync(); location.hash = returnTo; }
     });
     return;
   }
@@ -90,6 +96,7 @@ function renderHome(places, entries, lastBackup) {
       h('button', { type: 'button', class: 'btn btn-quiet', onclick: async e => {
         e.target.disabled = true;
         await removeSamples();
+        scheduleSync();
         route();
       } }, 'Remove samples')));
   }

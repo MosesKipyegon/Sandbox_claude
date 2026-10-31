@@ -2,6 +2,7 @@
 import { h } from './dom.js';
 import { get } from './db.js';
 import { blobUrl } from './photos.js';
+import { fetchFullPhoto } from './sync.js';
 
 let dialog;
 
@@ -18,8 +19,10 @@ export async function openViewer(photoIds, start, title) {
 
   for (const pid of photoIds) {
     const p = await get('photos', pid);
-    track.append(h('figure', { class: 'viewer-slide' },
-      p && p.full ? h('img', { src: blobUrl(p.full), alt: title }) : h('p', {}, 'Photo not available on this device yet.')));
+    const src = p && (p.full || p.thumb);
+    const img = src ? h('img', { src: blobUrl(src), alt: title }) : null;
+    track.append(h('figure', { class: 'viewer-slide' }, img || h('p', {}, 'Photo not available on this device yet.')));
+    if (img && !p.full) fetchFullPhoto(pid).then(full => { if (full) img.src = blobUrl(full); });
   }
   track.addEventListener('scroll', update, { passive: true });
 

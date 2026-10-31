@@ -5,7 +5,7 @@ A private travel journal for places visited in South Sudan (and anywhere else), 
 everything saved on your own device.
 
 - **Works offline:** once opened, the app, your entries, your photos and the map areas you've looked at all work without a network.
-- **Private:** no accounts, no analytics, no tracking. Nothing leaves your device unless you make a backup.
+- **Private:** no accounts, no analytics, no tracking. Nothing leaves your device unless you make a backup or turn on Google Drive sync, which stores your journal in *your own* Drive.
 - **Town-level locations only:** pins are rounded to about 1 km, and photos lose their GPS and other hidden data when you add them.
 
 The 45 UNHAS regular destinations come preloaded as "not yet visited". A few of the names and
@@ -70,7 +70,47 @@ screen reminds you after two weeks.
 - **Move to a new phone or the laptop:** back up on one device and restore (Merge) on the other.
 - **Google Sheets:** **Backup** → **Export CSV**, then in Sheets: **File → Import → Upload**. Sample entries are left out.
 
-Automatic sync between phone and laptop through Google Drive is the next step to build.
+## Sync your phone and laptop (Google Drive)
+
+With sync on, you can add and edit entries on either device. Everything meets in an **SSD Journal**
+folder in your own Google Drive:
+- `journal.json` holds all the text.
+- `photos/` holds the photos as JPEGs.
+
+**What it can access:** the app can only see files it created itself, never the rest of your Drive. Google's sign-in only loads when you use sync.
+
+**How it works:**
+- **Connect:** **Backup** → **Sync with Google Drive** → **Connect Google Drive**. Do this once on each device, with the same Google account.
+- **When it syncs:** when the app opens, a few seconds after you save, and when the network comes back. The top bar shows **● Synced**, **Syncing…**, or **Sync**.
+- **The one-hour limit:** Google signs the app out after about an hour. The badge then says **Sync**; tap it to sign in again and continue.
+- **Offline:** everything keeps working, and changes wait until the network is back.
+- **Same entry edited on both devices:** the most recent edit wins. Deleting an entry deletes it everywhere.
+- **Photos:** the other device first downloads small thumbnails, then each full photo when you open it. Before going to the field, tap **Download all photos** on the Backup page to have everything offline.
+
+Keep making zip backups too. Sync isn't a backup: deleting an entry on one device deletes it on the other.
+
+### Set up Google Drive sync (one time, about 10 minutes)
+
+Google needs to know which website is allowed to ask for Drive access. This creates a free
+"client ID" for SSD Journal. It isn't a secret and isn't billed.
+
+1. Go to **https://console.cloud.google.com/** and sign in with your Google account.
+2. Create a project: click the project picker at the top → **New project** → name it `SSD Journal` → **Create**, then select it.
+3. Turn on the Drive API: in the search bar, type **Google Drive API**, open it and click **Enable**.
+4. Set up the sign-in screen: open **Google Auth Platform** (also called the *OAuth consent screen*) → **Get started**.
+   - App name: `SSD Journal`. Support email: yours.
+   - Audience: **External**. Contact email: yours. Agree and click **Create**.
+5. Add yourself as a tester: **Audience** → **Test users** → **Add users** → your Gmail address → **Save**.
+6. Allow the Drive permission: **Data access** → **Add or remove scopes** → tick **`.../auth/drive.file`** ("See, edit, create and delete only the specific Google Drive files you use with this app") → **Update** → **Save**.
+7. Create the client ID: **Clients** → **Create client** → type **Web application** → name `SSD Journal web`. Under **Authorized JavaScript origins**, add:
+   - `https://moseskipyegon.github.io`
+   - `http://localhost:8000`, for testing on your laptop
+   
+   Click **Create** and copy the **Client ID**. It looks like `1234…apps.googleusercontent.com`.
+8. Paste it into **`js/config.js`** (`GOOGLE_CLIENT_ID = '…'`), run `node tools/stamp-sw.js`, then commit and push.
+
+The first time you connect, Google warns *"Google hasn't verified this app"*. That's expected
+for a personal app you made yourself: click **Continue**.
 
 ## Change the look
 
@@ -120,7 +160,8 @@ photos. Tap **Remove samples** on the home screen. They're deleted and won't com
 index.html              the page
 css/theme.css           colours, fonts and sizes (edit this one)
 css/app.css             layout and components
-js/                     app code: form, feed, map, photos, backup, offline
+js/                     app code: form, feed, map, photos, backup, offline, sync
+js/config.js            Google client ID for Drive sync
 data/south-sudan.geojson   built-in offline outline (Natural Earth, public domain)
 fonts/  icons/          Fraunces & Inter (SIL Open Font License), app icons
 vendor/                 Leaflet (map) and fflate (zip), both stored here so they work offline
@@ -129,4 +170,5 @@ tools/                  stamp-sw.js (run before publishing), build-icons.js, bui
 ```
 
 Map data © OpenStreetMap contributors. When online, map tiles are loaded from OpenStreetMap,
-which sees which map area is being viewed, like any online map. Nothing else is sent anywhere.
+which sees which map area is being viewed, like any online map. With sync on, your journal goes
+to your own Google Drive. Nothing else is sent anywhere.

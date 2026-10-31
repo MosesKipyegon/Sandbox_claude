@@ -26,7 +26,8 @@ export async function renderForm(container, { entry = null, places, presetPlaceI
   if (entry) {
     for (const pid of entry.photoIds || []) {
       const p = await get('photos', pid);
-      if (p && !p.deleted && p.thumb) state.photos.push({ id: pid, url: blobUrl(p.thumb), isNew: false });
+      // Keep every photo, even one not downloaded from Drive yet, so saving never drops it
+      if (p && !p.deleted) state.photos.push({ id: pid, url: p.thumb || p.full ? blobUrl(p.thumb || p.full) : '', isNew: false });
     }
   }
 
@@ -144,8 +145,8 @@ export async function renderForm(container, { entry = null, places, presetPlaceI
 
   function renderPhotos() {
     photoGrid.textContent = '';
-    state.photos.forEach((p, i) => photoGrid.append(h('div', { class: 'photo-tile' },
-      h('img', { src: p.url, alt: `Photo ${i + 1}` }),
+    state.photos.forEach((p, i) => photoGrid.append(h('div', { class: 'photo-tile' + (p.url ? '' : ' photo-busy') },
+      p.url ? h('img', { src: p.url, alt: `Photo ${i + 1}` }) : 'Not downloaded yet',
       i === 0 ? h('span', { class: 'photo-cover' }, 'Cover') : null,
       h('button', { type: 'button', class: 'photo-remove', 'aria-label': `Remove photo ${i + 1}`, onclick: () => {
         state.photos.splice(i, 1);

@@ -4,7 +4,7 @@ import { h } from './dom.js';
 
 export function initPwa() {
   const status = h('span', { class: 'net-status', hidden: navigator.onLine, title: 'No network — everything still works and is saved on this device' }, 'Offline');
-  const installBtn = h('button', { type: 'button', class: 'btn btn-quiet btn-small', hidden: true }, 'Install app');
+  const installBtn = h('button', { type: 'button', class: 'btn btn-quiet btn-small', hidden: true, title: 'Install SSD Journal as an app' }, 'Install');
   document.querySelector('.topbar-link').before(status, installBtn);
 
   const updateStatus = () => { status.hidden = navigator.onLine; };
