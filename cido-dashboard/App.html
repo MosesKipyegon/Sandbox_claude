@@ -13,12 +13,17 @@
   };
   const SERIES_VARS = ['--s1', '--s2', '--s3', '--s4'];
   const MAX_COMPARE = 4;
+  const CHECK_OVER = 1.5;   // flag indicators above 150% of target for a data check
 
   // ---------- State ----------
   const S = {
     series: [],          // one per indicator × county × disagg: {id,name,short,sector,county,disagg,unit,target,values[]}
     months: [],          // [{num,label}]
     N: 24,               // project length in months
+    start: 1,            // month activities began (expected pace counts from here)
+    thr: { onTrack: 0.9, atRisk: 0.6 },
+    remarks: {},         // indicator ID -> note from Activities_Master "Remarks"
+    builtAt: null,       // when Dashboard_Feed was last built
     latest: 1,           // last month with any reported data
     indicators: [],      // unique indicators {id,short,name,sector,unit}
     counties: [],
@@ -50,16 +55,26 @@
   const monthLabel = m => (S.months[m - 1] || {}).label || ('Month ' + m);
   const range = (a, b) => { const out = []; for (let i = a; i <= b; i++) out.push(i); return out; };
 
-  /** Same RAG rules as buildDashboardFeed() in Code.js */
+  /** Share of the target expected by month m (same as expectedShare() in Code.js) */
+  function expectedAt(m) {
+    return m < S.start ? 0 : (m - S.start + 1) / (S.N - S.start + 1);
+  }
+
+  /** Same status rules as statusFor() in Code.js */
   function statusFor(cum, target, m) {
     if (!(target > 0)) return 'No target';
-    const expectedTarget = target * (m / S.N);
-    if (cum / target >= 1) return 'Completed';
+    if (cum >= target) return 'Completed';
+    if (cum <= 0) return 'Not Started';
+    const expectedTarget = target * expectedAt(m);
     if (expectedTarget === 0) return 'On Track';
-    if (cum >= expectedTarget * 0.9) return 'On Track';
-    if (cum >= expectedTarget * 0.6) return 'At Risk';
-    if (cum > 0) return 'Lagging';
-    return 'Not Started';
+    if (cum >= expectedTarget * S.thr.onTrack) return 'On Track';
+    if (cum >= expectedTarget * S.thr.atRisk) return 'At Risk';
+    return 'Lagging';
+  }
+
+  /** Needs a look: behind pace, or still at zero after activities were due to start. */
+  function needsAttention(i, m) {
+    return i.status === 'At Risk' || i.status === 'Lagging' || (i.status === 'Not Started' && expectedAt(m) > 0);
   }
 
   function runningTotals(values) {
@@ -93,7 +108,9 @@
   }
 
   function onDataLoaded(data) {
-    const rows = (data || []).filter(r => r && r['Indicator_ID'] !== '' && r['Indicator_ID'] != null);
+    const payload = Array.isArray(data) ? { rows: data } : (data || {});
+    const meta = payload.meta || {};
+    const rows = (payload.rows || []).filter(r => r && r['Indicator_ID'] !== '' && r['Indicator_ID'] != null);
     if (!rows.length) { showError('Dashboard_Feed is empty — run buildDashboardFeed() in the sheet first.'); return; }
 
     // Months
@@ -101,6 +118,10 @@
     rows.forEach(r => { if (r['Month_Number']) monthMap.set(Number(r['Month_Number']), String(r['Month_Label'] || '')); });
     S.N = Math.max.apply(null, Array.from(monthMap.keys()));
     S.months = range(1, S.N).map(n => ({ num: n, label: monthMap.get(n) || ('Month ' + n) }));
+    S.start = Math.min(Math.max(Number(meta.activityStartMonth) || 1, 1), S.N);
+    S.thr = { onTrack: Number(meta.onTrack) || 0.9, atRisk: Number(meta.atRisk) || 0.6 };
+    S.remarks = meta.remarks || {};
+    S.builtAt = meta.builtAt ? new Date(meta.builtAt) : null;
 
     // Series
     const seriesMap = new Map();
@@ -132,6 +153,12 @@
 
     S.f = defaultFilters();
     $('dataThrough').textContent = 'Data through ' + monthLabel(S.latest) + ' · month ' + S.latest + ' of ' + S.N;
+    if (S.builtAt && !isNaN(S.builtAt)) {
+      $('builtAt').textContent = 'Updated ' + S.builtAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      const checked = meta.checkedAt ? new Date(meta.checkedAt) : null;
+      $('builtAt').title = 'Numbers last changed on ' + S.builtAt.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' }) +
+        (checked && !isNaN(checked) ? '\nLast checked against the sheet on ' + checked.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' }) : '');
+    }
 
     buildFilterControls();
     wireUi();
@@ -180,7 +207,8 @@
     a.cum = a.cumByMonth[f.to - 1];
     a.period = a.values.slice(f.from - 1, f.to).reduce((x, y) => x + y, 0);
     a.pct = a.target > 0 ? a.cum / a.target : null;
-    a.expected = f.to / S.N;
+    a.expected = expectedAt(f.to);
+    a.remark = S.remarks[a.id] || '';
     a.status = statusFor(a.cum, a.target, f.to);
     a.countiesLabel = uniq(a.counties).join(', ');
     return a;
@@ -205,7 +233,7 @@
   function renderKpis(view) {
     const withTarget = view.inds.filter(i => i.target > 0);
     const avg = withTarget.length ? withTarget.reduce((s, i) => s + Math.min(i.pct, 1), 0) / withTarget.length : null;
-    const expected = S.f.to / S.N;
+    const expected = expectedAt(S.f.to);
     $('kpiProgress').textContent = fmtPct(avg);
 
     const sub = $('kpiProgressSub');
@@ -243,7 +271,10 @@
       legend.appendChild(l);
     });
 
-    $('kpiAttention').textContent = counts['At Risk'] + counts['Lagging'];
+    const attention = view.inds.filter(i => needsAttention(i, S.f.to));
+    $('kpiAttention').textContent = attention.length;
+    const notStarted = attention.filter(i => i.status === 'Not Started').length;
+    $('kpiAttentionSub').textContent = (attention.length - notStarted) + ' behind pace · ' + notStarted + ' not started yet';
     const reported = view.inds.filter(i => i.period > 0).length;
     $('kpiCoverage').textContent = view.inds.length ? Math.round(reported / view.inds.length * 100) + '%' : '–';
     $('kpiCoverageSub').textContent = reported + ' of ' + view.inds.length + ' indicators reported data, ' + monthLabel(S.f.from) + ' – ' + monthLabel(S.f.to);
@@ -361,7 +392,7 @@
     const withTarget = view.inds.filter(i => i.target > 0);
     const actual = months.map(m => m > S.latest || !withTarget.length ? null :
       withTarget.reduce((s, i) => s + Math.min(i.cumByMonth[m - 1] / i.target, 1), 0) / withTarget.length * 100);
-    const expected = months.map(m => m / S.N * 100);
+    const expected = months.map(m => expectedAt(m) * 100);
 
     makeChart('progressTrend', 'progressTrendChart', {
       type: 'line',
@@ -529,7 +560,7 @@
     };
     const datasets = picked.map(x => lineDataset(x.s.short, months.map(m => valueAt(x.s, m)), cssVar(SERIES_VARS[x.c.slot])));
     if (mode === 'pct' && picked.length) {
-      datasets.push(lineDataset('Expected pace', months.map(m => m / S.N * 100), cssVar('--expected'), { borderDash: [5, 4], pointRadius: 0, tension: 0 }));
+      datasets.push(lineDataset('Expected pace', months.map(m => expectedAt(m) * 100), cssVar('--expected'), { borderDash: [5, 4], pointRadius: 0, tension: 0 }));
     }
     const unit = units[0] || '';
     $('compareSub').textContent = picked.length
@@ -586,7 +617,7 @@
     keys = by === 'Sector' ? keys.sort((a, b) => sectorRank(a) - sectorRank(b)) : keys.sort();
     const vals = keys.map(k => { const g = groups.get(k); return g.reduce((a, b) => a + b, 0) / g.length * 100; });
     const ns = keys.map(k => groups.get(k).length);
-    const expected = S.f.to / S.N * 100;
+    const expected = expectedAt(S.f.to) * 100;
 
     makeChart('breakdown', 'breakdownChart', {
       type: 'bar',
@@ -709,7 +740,7 @@
     const items = view.inds.filter(i => i.target > 0).sort((a, b) => b.pct - a.pct);
     const container = $('indicatorContainer');
     container.style.height = Math.max(220, items.length * 28 + 90) + 'px';
-    const expected = S.f.to / S.N * 100;
+    const expected = expectedAt(S.f.to) * 100;
     const maxPct = Math.max(100, ...items.map(i => i.pct * 100));
     const present = STATUSES.filter(s => items.some(i => i.status === s));
 
@@ -747,7 +778,7 @@
               title: c => items[c[0].dataIndex].name || items[c[0].dataIndex].short,
               label: c => {
                 const i = items[c.dataIndex];
-                return [' ' + fmtPct(i.pct) + '  ' + i.status, ' ' + fmt(i.cum) + ' of ' + fmt(i.target) + ' ' + i.unit];
+                return [' ' + fmtPct(i.pct) + '  ' + i.status, ' ' + fmt(i.cum) + ' of ' + fmt(i.target) + ' ' + i.unit].concat(i.remark ? [' Note: ' + i.remark] : []);
               }
             }
           }
@@ -785,12 +816,13 @@
       tbody.innerHTML = '<tr><td colspan="10" class="empty">No indicators match this selection.</td></tr>';
       return;
     }
-    const expected = S.f.to / S.N;
+    const expected = expectedAt(S.f.to);
     tbody.innerHTML = rows.map(i => {
       const color = cssVar(STATUS_VAR[i.status]);
       const pctW = i.pct == null ? 0 : Math.min(i.pct, 1) * 100;
       return '<tr data-id="' + esc(i.id) + '" tabindex="0">' +
-        '<td><div class="ind-name">' + esc(i.short) + '</div><div class="ind-full">' + esc(i.name) + '</div></td>' +
+        '<td><div class="ind-name">' + esc(i.short) + '</div><div class="ind-full">' + esc(i.name) + '</div>' +
+          (i.remark ? '<div class="ind-note">' + esc(i.remark) + '</div>' : '') + '</td>' +
         '<td>' + esc(i.sector) + '</td>' +
         '<td>' + esc(i.countiesLabel) + '</td>' +
         '<td>' + esc(i.unit) + '</td>' +
@@ -800,7 +832,9 @@
         '<td><div class="progress-wrapper"><div class="progress-bar">' +
           '<div class="progress-fill" style="width:' + pctW + '%;background:' + color + '"></div>' +
           '<div class="progress-expected" style="left:calc(' + Math.min(expected, 1) * 100 + '% - 1px)" title="Expected ' + fmtPct(expected, 0) + '"></div>' +
-        '</div><div class="progress-text">' + fmtPct(i.pct) + '</div></div></td>' +
+        '</div><div class="progress-text">' + fmtPct(i.pct) + '</div>' +
+          (i.pct > CHECK_OVER ? '<span class="flag-check" title="Over ' + CHECK_OVER * 100 + '% of target: check the target, or whether repeat visits are counted more than once">check</span>' : '') +
+          '</div></td>' +
         '<td>' + sparkline(i.values.slice(S.f.from - 1, Math.min(S.f.to, S.latest))) + '</td>' +
         '<td><span class="status-badge"><span class="status-dot" style="background:' + color + '"></span>' + esc(i.status) + '</span></td>' +
         '</tr>';
@@ -825,10 +859,10 @@
   }
 
   function exportCsv() {
-    const head = ['Indicator_ID', 'Short_Name', 'Indicator_Name', 'Sector', 'Counties', 'Unit', 'Target', 'In_Period', 'Achieved_To_Date', 'Pct_Achieved', 'Expected_Pct', 'Status'];
+    const head = ['Indicator_ID', 'Short_Name', 'Indicator_Name', 'Sector', 'Counties', 'Unit', 'Target', 'In_Period', 'Achieved_To_Date', 'Pct_Achieved', 'Expected_Pct', 'Status', 'Remarks'];
     const lines = [head].concat((S.tableRows || []).map(i => [
       i.id, i.short, i.name, i.sector, i.countiesLabel, i.unit, i.target, i.period, i.cum,
-      i.pct == null ? '' : (i.pct * 100).toFixed(1), (i.expected * 100).toFixed(1), i.status
+      i.pct == null ? '' : (i.pct * 100).toFixed(1), (i.expected * 100).toFixed(1), i.status, i.remark
     ]));
     const csv = lines.map(r => r.map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')).join('\r\n');
     const a = document.createElement('a');

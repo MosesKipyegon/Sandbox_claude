@@ -24,7 +24,10 @@
     </div>
     <div class="logo-plate logo-sv"><?!= include('LogoSv'); ?></div>
     <div class="header-meta">
-      <span id="dataThrough" class="pill"></span>
+      <div class="data-stamp">
+        <span id="dataThrough" class="pill"></span>
+        <span id="builtAt" class="built-at"></span>
+      </div>
       <button id="themeToggle" class="icon-btn" type="button" aria-label="Switch light/dark theme" title="Switch light/dark theme">◐</button>
     </div>
   </header>
@@ -99,7 +102,7 @@
       <div class="kpi-card">
         <div class="kpi-label">Needing attention</div>
         <div class="kpi-value" id="kpiAttention">–</div>
-        <div class="kpi-sub">At risk or lagging against expected pace</div>
+        <div class="kpi-sub" id="kpiAttentionSub">At risk, lagging, or not started when due</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Reporting coverage</div>

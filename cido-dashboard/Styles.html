@@ -7,6 +7,7 @@
     --brand-strong: #0f6b2c;
     --brand-tint: #e8f6ec;
     --brand-orange: #f58220;
+    --note-text: #a8530a; --note-tint: #fef3e8;   /* CIDO orange, deepened for readable text / softened for backgrounds */
 
     /* Surfaces & ink */
     --page: #f4f5f2;
@@ -46,6 +47,7 @@
     :root:where(:not([data-theme="light"])) {
       color-scheme: dark;
       --brand: #157a33; --brand-strong: #0f5f27; --brand-tint: #16301e;
+    --note-text: #f9a55e; --note-tint: #2b1e12;
       --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321;
       --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a998f;
       --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
@@ -59,6 +61,7 @@
   :root[data-theme="dark"] {
     color-scheme: dark;
     --brand: #157a33; --brand-strong: #0f5f27; --brand-tint: #16301e;
+    --note-text: #f9a55e; --note-tint: #2b1e12;
     --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321;
     --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a998f;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
@@ -97,6 +100,9 @@
   .header-text p { font-size: 13px; opacity: 0.88; }
   .header-meta { display: flex; align-items: center; gap: 10px; justify-self: end; }
   .pill { background: rgba(255,255,255,0.16); padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .data-stamp { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .built-at { font-size: 11px; opacity: 0.8; }
+  .built-at:empty { display: none; }
   .icon-btn {
     background: rgba(255,255,255,0.16); border: 0; color: #fff; width: 34px; height: 34px;
     border-radius: 50%; cursor: pointer; font-size: 17px;
@@ -218,6 +224,11 @@
   #tableBody tr.in-compare td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
   .ind-name { font-weight: 600; }
   .ind-full { font-size: 11px; color: var(--text-muted); max-width: 340px; }
+  .ind-note { font-size: 11px; color: var(--text-primary); max-width: 340px; margin-top: 5px; padding: 3px 8px;
+              border-left: 3px solid var(--brand-orange); background: var(--note-tint); border-radius: 0 6px 6px 0; }
+  .ind-note::before { content: 'Note: '; font-weight: 700; color: var(--note-text); }
+  .flag-check { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 999px;
+                border: 1px solid var(--st-atrisk); color: var(--text-primary); cursor: help; white-space: nowrap; }
   .chart-table { max-height: 340px; overflow: auto; }
   .chart-table table { font-size: 12px; }
   #tableSearch { cursor: text; min-width: 220px; height: 30px; }
