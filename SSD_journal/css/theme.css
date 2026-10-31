@@ -1,0 +1,67 @@
+/* ==========================================================================
+   SSD Journal — theme
+   Change the look here: colours, fonts, sizes. Everything else reads these.
+   ========================================================================== */
+
+/* Fonts are stored in /fonts so they work offline. To use another font, add its .woff2 there,
+   add an @font-face like these, and change --font-display / --font-body below. */
+@font-face {
+  font-family: "Fraunces"; src: url("../fonts/fraunces.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Fraunces"; src: url("../fonts/fraunces-italic.woff2") format("woff2");
+  font-weight: 100 900; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Inter"; src: url("../fonts/inter.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+
+:root {
+  /* Paper & ink */
+  --paper: #F6F1E7;          /* page background */
+  --card: #FFFDF8;           /* cards, form fields */
+  --ink: #2B2622;            /* main text */
+  --ink-soft: #6E645B;       /* secondary text, labels */
+  --line: #E4DACB;           /* dividers, borders */
+
+  /* Accents */
+  --accent: #C4622D;         /* laterite terracotta: buttons, visited pins */
+  --accent-strong: #A84F20;  /* pressed / hover */
+  --accent-ink: #FFFFFF;     /* text on accent */
+  --nile: #2F6F8F;           /* links, map water */
+  --gold: #D9A441;           /* rating stars */
+  --acacia: #5E7A4A;         /* "visited" badges, success */
+  --danger: #B3402F;         /* delete */
+
+  /* Type */
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.6rem;
+  --text-2xl: 2.1rem;
+  --display-weight: 560;     /* headings & place names (100–900) */
+  --body-weight: 400;
+
+  /* Shape & space */
+  --radius: 14px;
+  --radius-sm: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --shadow: 0 1px 2px rgba(43, 38, 34, 0.05), 0 6px 20px rgba(43, 38, 34, 0.06);
+
+  /* Map */
+  --map-height: min(46vh, 440px);
+  --map-outside: #E8E0D0;          /* around South Sudan on the offline outline */
+  --map-tile-filter: sepia(0.18) saturate(0.85) brightness(1.02);  /* warms OSM tiles; set to none for raw */
+  --content-width: 720px;    /* feed width on laptops */
+  --photo-ratio: 4 / 3;      /* card photo shape: try 3 / 2, 1 / 1 or 4 / 5 */
+}

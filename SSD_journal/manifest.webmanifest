@@ -1,0 +1,16 @@
+{
+  "name": "SSD Journal",
+  "short_name": "SSD Journal",
+  "description": "A private, offline travel journal for places visited in South Sudan.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F6F1E7",
+  "theme_color": "#F6F1E7",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

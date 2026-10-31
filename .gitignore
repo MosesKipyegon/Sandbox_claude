@@ -31,3 +31,6 @@ build/
 
 # Local dashboard preview (generated)
 preview/
+
+# SSD Journal: private reference material (not for the public repo)
+SSD_journal/reference/

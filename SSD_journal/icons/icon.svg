@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- SSD Journal app icon: a map pin over a river line, on terracotta. Edit freely; re-run tools/build-icons.js -->
+  <rect width="512" height="512" fill="#C4622D"/>
+  <path d="M0 372 C 120 340, 210 404, 300 380 S 450 330, 512 352 L 512 512 L 0 512 Z" fill="#A84F20"/>
+  <path d="M0 392 C 120 360, 210 424, 300 400 S 450 350, 512 372" fill="none" stroke="#F6F1E7" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+  <path d="M256 96 C 186 96 136 146 136 214 C 136 296 256 380 256 380 C 256 380 376 296 376 214 C 376 146 326 96 256 96 Z" fill="#F6F1E7"/>
+  <circle cx="256" cy="212" r="46" fill="#C4622D"/>
+</svg>

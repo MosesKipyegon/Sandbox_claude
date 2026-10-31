@@ -33,6 +33,7 @@ Keep a running list here (update as you go):
 | Folder | What it explores | Status |
 |--------|------------------|--------|
 | [cido-dashboard](cido-dashboard/) | Redesigning a Google Sheets + Apps Script M&E dashboard (filters, trend charts, look) | In progress |
+| [SSD_journal](SSD_journal/) | Offline-first travel journal PWA: map of visited places, photo feed, zip backups | In progress (Drive sync next) |
 
 ## Tips for using Claude Code here
 
